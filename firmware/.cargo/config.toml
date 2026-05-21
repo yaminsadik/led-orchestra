@@ -9,3 +9,5 @@ rustflags = [
 
 [env]
 ESP_LOG = "info"
+LED_ORCHESTRA_WIFI_SSID = { value = "", force = false }
+LED_ORCHESTRA_WIFI_PASSWORD = { value = "", force = false }

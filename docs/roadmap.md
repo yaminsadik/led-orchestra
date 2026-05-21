@@ -23,16 +23,19 @@ Already done:
 
 - `shared::SetScenePacket` defines a fixed-width `no_std` scene packet.
 - `loctl all solid`, `loctl all effect`, and `loctl all off` send UDP packets.
+- Firmware joins WiFi when credentials are provided by build-time environment
+  variables or an ignored `firmware/.env` file.
+- Firmware listens for UDP datagrams on port `4242`.
+- Firmware decodes `SetScenePacket`, ignores packets for other node ids, and
+  swaps the active scene after a valid targeted or broadcast packet.
+- The board keeps rendering the last valid scene while disconnected.
 - Controller-side packet and parsing tests pass.
+- Real ESP32-C3 flash succeeds, and the firmware accepts UDP scene packets over
+  LAN broadcast.
 
 Remaining acceptance criteria:
 
-- Firmware joins a configured WiFi network.
-- Firmware listens for UDP datagrams on port `4242`.
-- Firmware decodes `SetScenePacket`.
-- Firmware ignores packets for other node ids.
-- Firmware swaps the active scene after a valid targeted or broadcast packet.
-- The board keeps rendering the last valid scene while disconnected.
+- Confirm a real controller command changes the physical LEDs.
 - An operator can run:
 
 ```bash
@@ -40,15 +43,14 @@ cd controller
 cargo run -- --bus udp://NODE_IP:4242 --target-node 1 all solid ff0000
 cargo run -- --bus udp://NODE_IP:4242 --target-node 1 all effect rainbow
 cargo run -- --bus udp://NODE_IP:4242 --target-node 1 all off
+cargo run -- --bus udp://192.168.1.255:4242 --target-node 1 all solid ff0000
 ```
 
 Recommended next implementation slice:
 
-1. Pick and pin the ESP WiFi/network crate versions that match `esp-hal`.
-2. Add build-time WiFi credentials for local testing.
-3. Add a small firmware network module that owns WiFi join and UDP receive.
-4. Keep the LED render loop alive even when networking is not ready.
-5. Log every accepted packet with sequence, target, and effect name.
+1. Confirm the physical strip changes after the accepted UDP packets.
+2. Use LAN broadcast if unicast reports `No route to host`.
+3. Mark Phase 2 done after the physical LEDs respond.
 
 ## Phase 3: Per-Node Segment Config For 20 Boards
 

@@ -5,3 +5,6 @@ Cargo.lock
 *.swp
 .idea/
 .vscode/
+.env
+.env.*
+!.env.example

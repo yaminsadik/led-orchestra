@@ -8,6 +8,7 @@ controller to one node or to all nodes. The packet type lives in
 
 - Default bus: `udp://239.42.0.1:4242`
 - Unicast example: `udp://192.168.1.42:4242`
+- LAN broadcast example: `udp://192.168.1.255:4242`
 - Packet size: 16 bytes
 - Byte order: big endian for multi-byte integers
 - Broadcast target: `target_node = 0`
@@ -19,6 +20,7 @@ cd controller
 cargo run -- all effect rainbow --brightness 40 --speed 128
 cargo run -- all solid ff8800 --brightness 40
 cargo run -- --bus udp://192.168.1.42:4242 --target-node 1 all off
+cargo run -- --bus udp://192.168.1.255:4242 --target-node 1 all solid ff0000
 ```
 
 ## SetScenePacket Layout
@@ -50,7 +52,7 @@ old ids for different behavior.
 
 ## Firmware Receive Rules
 
-The Phase 2 firmware receiver should:
+The Phase 2 firmware receiver:
 
 1. Listen on UDP port `4242`.
 2. Decode incoming datagrams with `SetScenePacket::decode`.

@@ -216,6 +216,11 @@ fn send_scene(bus: &str, target_node: u16, scene: ActiveScene) -> Result<()> {
                 .set_multicast_ttl_v4(1)
                 .context("failed to set multicast TTL")?;
         }
+        if addr.ip().octets()[3] == 255 {
+            socket
+                .set_broadcast(true)
+                .context("failed to enable UDP broadcast")?;
+        }
     }
 
     let packet = SetScenePacket::new(packet_sequence(), target_node, scene);

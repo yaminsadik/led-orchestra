@@ -73,15 +73,27 @@ cargo install espflash
 
 ### Firmware (per board)
 
+Create a local ignored credentials file:
+
+```bash
+cp firmware/.env.example firmware/.env
+# Edit firmware/.env with your WiFi SSID and password.
+```
+
 ```bash
 cd firmware
 cargo build --release            # compile only
+
 cargo run --release              # flash + monitor via espflash
 ```
 
 The `.cargo/config.toml` runner pipes the build through
 `espflash flash --monitor` so `cargo run` reflashes whichever board is on
 `/dev/cu.usbserial-*` (or your platform's equivalent).
+
+Environment variables still override `firmware/.env` when both are set. If
+neither is set, the firmware renders the Phase 1 fallback rainbow locally, but
+it does not start the Phase 2 UDP receiver.
 
 ### Controller
 
@@ -101,19 +113,24 @@ cargo run -- all off
 
 # For a single board, send unicast to its WiFi address and node id.
 cargo run -- --bus udp://192.168.1.42:4242 --target-node 1 all solid 00ff44
+
+# If the router blocks WiFi client-to-client unicast, send LAN broadcast.
+cargo run -- --bus udp://192.168.1.255:4242 --target-node 1 all effect rainbow
 ```
 
 `shared::SetScenePacket` is the fixed-width `no_std` wire contract used by
-the controller and, next, the firmware UDP receiver. The remaining Phase 2
-firmware work is to join WiFi, listen on UDP port `4242`, decode
-`SetScenePacket`, and swap the active scene when the packet targets this node.
+the controller and firmware UDP receiver. The node joins WiFi, listens on UDP
+port `4242`, decodes `SetScenePacket`, and swaps the active scene when the
+packet targets this node.
 
 ## Phase status
 
 - [x] **Phase 1** — One ESP32-C3 drives one strip with one effect
 - [ ] Phase 2 — Controller sends commands to one node over WiFi
   - Controller UDP send path and shared packet protocol are in place.
-  - Firmware WiFi join + UDP receive loop remains.
+  - Firmware WiFi join + UDP receive loop builds.
+  - Real-board flash + UDP packet acceptance works via LAN broadcast.
+  - Physical LED response confirmation remains.
   - See [Roadmap](docs/roadmap.md#phase-2-controller-to-one-node-over-wifi).
 - [ ] Phase 3 — Per-node segment config for 20 boards
 - [ ] Phase 4 — Global synced effects (time sync across nodes)
