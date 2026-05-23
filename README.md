@@ -1,6 +1,6 @@
 # LED Orchestra
 
-Distributed addressable-LED light show. Up to 20 × ESP32-C3 nodes each drive
+Distributed addressable-LED light show. Up to 20 × ESP32-C3/C6 nodes each drive
 a WS2812B (NeoPixel) strip segment; together the segments form one virtual
 strip. A Rust CLI controller is the source of truth for layout, scene, mode,
 groups, and overrides.
@@ -9,8 +9,8 @@ groups, and overrides.
 
 | Crate         | What it is                                                            | Build target                          |
 |---------------|-----------------------------------------------------------------------|---------------------------------------|
-| `shared/`     | `no_std` protocol types, `Effect` trait, effect implementations       | host + `riscv32imc-unknown-none-elf`  |
-| `firmware/`   | esp-hal + esp-hal-smartled firmware for one ESP32-C3 node             | `riscv32imc-unknown-none-elf`         |
+| `shared/`     | `no_std` protocol types, `Effect` trait, effect implementations       | host + ESP RISC-V targets             |
+| `firmware/`   | esp-hal + esp-hal-smartled firmware for one ESP32-C3/C6 node          | C3: `riscv32imc`; C6: `riscv32imac`   |
 | `controller/` | clap CLI (`loctl`) for sending commands and inspecting state          | host                                  |
 
 `shared/` is pulled in by both `firmware/` and `controller/` so effects, the
@@ -49,7 +49,7 @@ files.
 
 ## Hardware
 
-- ESP32-C3 dev board per node (RISC-V, stock nightly/stable Rust)
+- ESP32-C3 or ESP32-C6 dev board per node (RISC-V, stock nightly/stable Rust)
 - WS2812B / NeoPixel strip per node (5 V, addressable; pads: GND, DIN, +5 V)
 - **External 5 V power supply for the strip** — do not power it from the ESP32
 - ESP32 GND and PSU GND must be tied together
@@ -64,8 +64,9 @@ files.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 
-# 2. Add the ESP32-C3 target
+# 2. Add the ESP32-C3 and ESP32-C6 targets
 rustup target add riscv32imc-unknown-none-elf
+rustup target add riscv32imac-unknown-none-elf
 
 # 3. Install the flasher
 cargo install espflash
@@ -82,14 +83,26 @@ cp firmware/.env.example firmware/.env
 
 ```bash
 cd firmware
-cargo build --release            # compile only
 
-cargo run --release              # flash + monitor via espflash
+# ESP32-C3, the default firmware feature.
+cargo build --release
+cargo run --release
+
+# ESP32-C6.
+cargo build --release \
+  --no-default-features \
+  --features chip-esp32c6 \
+  --target riscv32imac-unknown-none-elf
+cargo run --release \
+  --no-default-features \
+  --features chip-esp32c6 \
+  --target riscv32imac-unknown-none-elf
 ```
 
 The `.cargo/config.toml` runner pipes the build through
-`espflash flash --monitor` so `cargo run` reflashes whichever board is on
-`/dev/cu.usbserial-*` (or your platform's equivalent).
+`espflash flash --monitor` so `cargo run` reflashes the connected board. If
+multiple ESP boards are plugged in, pass the port explicitly through espflash
+or unplug the boards you are not flashing.
 
 Environment variables still override `firmware/.env` when both are set. If
 neither is set, the firmware renders the Phase 1 fallback rainbow locally, but
@@ -130,6 +143,7 @@ packet targets this node.
   - Controller UDP send path and shared packet protocol are in place.
   - Firmware WiFi join + UDP receive loop builds.
   - Real-board flash + UDP packet acceptance works via LAN broadcast.
+  - Firmware has separate build features for ESP32-C3 and ESP32-C6.
   - Physical LED response confirmation remains.
   - See [Roadmap](docs/roadmap.md#phase-2-controller-to-one-node-over-wifi).
 - [ ] Phase 3 — Per-node segment config for 20 boards

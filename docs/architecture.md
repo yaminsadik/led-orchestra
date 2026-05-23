@@ -1,6 +1,6 @@
 # Architecture
 
-LED Orchestra is a distributed LED renderer. Each ESP32-C3 node owns one
+LED Orchestra is a distributed LED renderer. Each ESP32-C3/C6 node owns one
 physical strip segment, while the controller owns the show state and sends
 commands over the network.
 
@@ -9,7 +9,7 @@ commands over the network.
 | Crate | Role |
 | --- | --- |
 | `shared/` | `no_std` contract shared by firmware and controller: colors, effects, node config, and packet encoding. |
-| `firmware/` | ESP32-C3 runtime that renders one segment locally and, from Phase 2 onward, listens for controller packets. |
+| `firmware/` | ESP32-C3/C6 runtime that renders one segment locally and, from Phase 2 onward, listens for controller packets. |
 | `controller/` | Host CLI (`loctl`) that lists effects and sends show commands over UDP. Later phases add state, scenes, and a TUI. |
 
 The project intentionally has no top-level Cargo workspace. The firmware and
@@ -35,7 +35,7 @@ global LED index, so a rainbow or wave can flow across board boundaries.
 Phase 2 command path:
 
 ```text
-operator -> loctl -> UDP SetScenePacket -> ESP32-C3 node -> ActiveScene -> LEDs
+operator -> loctl -> UDP SetScenePacket -> ESP32 node -> ActiveScene -> LEDs
 ```
 
 Later phases extend this flow:
@@ -51,6 +51,8 @@ nodes continue rendering the last valid scene locally if WiFi drops.
 
 - Effects are pure functions of `(global_index, time_ms, params, context)`.
 - Nodes do not need per-effect mutable state to stay visually aligned.
+- ESP32-C3 and ESP32-C6 nodes run separate firmware builds but share the same
+  wire protocol and effect code.
 - The controller resolves priority before nodes render.
 - A node ignores packets for other node ids.
 - A broadcast target node id of `0` applies to every node.

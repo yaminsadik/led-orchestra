@@ -1,6 +1,12 @@
 #![no_std]
 #![no_main]
 
+#[cfg(all(feature = "chip-esp32c3", feature = "chip-esp32c6"))]
+compile_error!("Select exactly one firmware chip feature: chip-esp32c3 or chip-esp32c6.");
+
+#[cfg(not(any(feature = "chip-esp32c3", feature = "chip-esp32c6")))]
+compile_error!("Select a firmware chip feature: chip-esp32c3 or chip-esp32c6.");
+
 mod node_config;
 
 use core::sync::atomic::{AtomicU8, Ordering};
@@ -10,8 +16,9 @@ use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{Runner, Stack, StackResources};
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
+use esp_hal::ram;
 use esp_hal::{
-    interrupt::software::SoftwareInterruptControl, rmt::Rmt, rng::Rng, time::Rate,
+    clock::CpuClock, interrupt::software::SoftwareInterruptControl, rmt::Rmt, rng::Rng, time::Rate,
     timer::timg::TimerGroup,
 };
 use esp_hal_smartled::{smart_led_buffer, SmartLedsAdapter};
@@ -67,7 +74,8 @@ static NET_RESOURCES: StaticCell<StackResources<NET_SOCKET_COUNT>> = StaticCell:
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    let p = esp_hal::init(esp_hal::Config::default());
+    let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
+    esp_alloc::heap_allocator!(#[ram(reclaimed)] size: 64 * 1024);
     esp_alloc::heap_allocator!(size: 64 * 1024);
     esp_println::logger::init_logger_from_env();
 
@@ -83,21 +91,16 @@ async fn main(spawner: Spawner) -> ! {
     let timg0 = TimerGroup::new(p.TIMG0);
     let software_interrupt = SoftwareInterruptControl::new(p.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, software_interrupt.software_interrupt0);
-
-    let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).expect("RMT init failed");
-    let mut rmt_buffer = smart_led_buffer!(LED_COUNT);
-
-    // The HAL exposes each GPIO as a distinct typed singleton, so we can't
-    // pick one at runtime from a `u8`. Phase 3 will introduce per-board build
-    // features (or a typed wrapper) so `NODE.led_gpio_pin` actually drives
-    // this choice. For now we hardcode GPIO2 and document the override.
-    let mut strip = SmartLedsAdapter::new(rmt.channel0, p.GPIO2, &mut rmt_buffer);
+    log::info!("RTOS scheduler started");
 
     if wifi_configured() {
+        log::info!("initializing WiFi radio");
         let radio = RADIO.init(esp_radio::init().expect("radio init failed"));
+        log::info!("creating WiFi station interface");
         let (controller, interfaces) =
             esp_radio::wifi::new(radio, p.WIFI, Default::default()).expect("WiFi init failed");
 
+        log::info!("creating network stack");
         let seed = random_seed();
         let (stack, runner) = embassy_net::new(
             interfaces.sta,
@@ -115,6 +118,16 @@ async fn main(spawner: Spawner) -> ! {
             "WiFi disabled; set LED_ORCHESTRA_WIFI_SSID and LED_ORCHESTRA_WIFI_PASSWORD at build time"
         );
     }
+
+    log::info!("initializing LED strip on GPIO{}", NODE.led_gpio_pin);
+    let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).expect("RMT init failed");
+    let mut rmt_buffer = smart_led_buffer!(LED_COUNT);
+
+    // The HAL exposes each GPIO as a distinct typed singleton, so we can't
+    // pick one at runtime from a `u8`. Phase 3 will introduce per-board build
+    // features (or a typed wrapper) so `NODE.led_gpio_pin` actually drives
+    // this choice. For now we hardcode GPIO2 and document the override.
+    let mut strip = SmartLedsAdapter::new(rmt.channel0, p.GPIO2, &mut rmt_buffer);
 
     let ctx = EffectContext {
         total_leds: NODE.total_leds,
@@ -177,7 +190,7 @@ async fn wifi_task(mut controller: WifiController<'static>) -> ! {
             if !matches!(controller.is_connected(), Ok(true)) {
                 log::info!("connecting to WiFi SSID '{}'", WIFI_SSID);
                 match controller.connect_async().await {
-                    Ok(()) => log::info!("WiFi connected"),
+                    Ok(_) => log::info!("WiFi connected"),
                     Err(err) => {
                         log::warn!("WiFi connect failed: {:?}", err);
                         Timer::after(Duration::from_secs(5)).await;

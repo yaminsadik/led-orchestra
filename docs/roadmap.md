@@ -32,6 +32,8 @@ Already done:
 - Controller-side packet and parsing tests pass.
 - Real ESP32-C3 flash succeeds, and the firmware accepts UDP scene packets over
   LAN broadcast.
+- Firmware can be built separately for ESP32-C3 and ESP32-C6 from the same
+  source tree.
 
 Remaining acceptance criteria:
 
@@ -50,11 +52,13 @@ Recommended next implementation slice:
 
 1. Confirm the physical strip changes after the accepted UDP packets.
 2. Use LAN broadcast if unicast reports `No route to host`.
-3. Mark Phase 2 done after the physical LEDs respond.
+3. Flash and smoke-test the ESP32-C6 build on one board.
+4. Mark Phase 2 done after the physical LEDs respond.
 
 ## Phase 3: Per-Node Segment Config For 20 Boards
 
-Goal: one firmware image can run on every node.
+Goal: one firmware codebase can provision every node, with separate chip builds
+where the hardware target requires them.
 
 Acceptance criteria:
 

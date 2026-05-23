@@ -12,7 +12,7 @@ fn main() {
     for key in WIFI_KEYS {
         println!("cargo:rerun-if-env-changed={key}");
 
-        if let Ok(value) = env::var(key) {
+        if let Some(value) = env::var(key).ok().filter(|value| !value.is_empty()) {
             println!("cargo:rustc-env={key}={value}");
         } else if let Some(value) = dotenv
             .iter()
