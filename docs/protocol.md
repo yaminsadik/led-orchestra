@@ -98,7 +98,8 @@ Likely additions:
 - `SetConfig`: controller provisions `NodeConfig`.
 - `SyncClock`: controller sends a time origin or clock offset.
 - `Heartbeat`: node reports liveness and current sequence.
-- `OtaChunk`: Phase 7 firmware update payload.
+- `OtaChunk`: possible Rust fallback update payload. The primary offline OTA
+  direction is now Matter OTA in Phase 6.
 
 New packet kinds should preserve the `LO`, version, kind prefix so firmware can
 quickly reject unsupported traffic.

@@ -19,7 +19,7 @@ esp-backtrace = { version = "0.18", features = [
 ] }
 esp-println = { version = "0.16", features = ["esp32c6", "log-04"] }
 esp-bootloader-esp-idf = { version = "0.4", features = ["esp32c6"] }
-esp-radio = { version = "0.17", features = ["esp32c6", "wifi", "coex", "log-04", "unstable"] }
+esp-radio = { version = "0.17", features = ["esp32c6", "wifi", "log-04", "unstable"] }
 esp-rtos = { version = "0.2", features = ["esp32c6", "embassy", "esp-radio", "esp-alloc", "log-04"] }
 smart-leds = "0.4"
 log = "0.4"

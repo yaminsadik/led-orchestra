@@ -65,7 +65,7 @@ enum Command {
     #[command(subcommand)]
     Scene(SceneCmd),
 
-    /// OTA firmware update (Phase 7 — placeholder).
+    /// OTA firmware update (legacy placeholder; Matter/Thread OTA is Phase 6).
     Firmware {
         #[arg(long)]
         image: String,

@@ -1,8 +1,9 @@
 //! Per-node hardcoded config for Phase 1/2.
 //!
 //! Phase 1: one ESP32-C6 dev board drives one strip; this node *is* the whole
-//! virtual strip. Phase 3 will load `NodeConfig` from flash (provisioned over
-//! WiFi) so each board can keep its own segment and GPIO settings.
+//! virtual strip. Later phases will load `NodeConfig` from flash (provisioned
+//! by the active control transport) so each board can keep its own segment and
+//! GPIO settings.
 
 use led_orchestra_shared::{NodeConfig, SegmentConfig};
 

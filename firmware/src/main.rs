@@ -118,8 +118,8 @@ async fn main(spawner: Spawner) -> ! {
     let mut rmt_buffer = smart_led_buffer!(LED_COUNT);
 
     // The HAL exposes each GPIO as a distinct typed singleton, so we can't
-    // pick one at runtime from a `u8`. Phase 3 will introduce per-board config
-    // or a typed wrapper so `NODE.led_gpio_pin` actually drives this choice.
+    // pick one at runtime from a `u8`. Later durable config work will introduce
+    // per-board config or a typed wrapper so `NODE.led_gpio_pin` drives this choice.
     // For now we hardcode GPIO2 and document the override.
     let mut strip = SmartLedsAdapter::new(rmt.channel0, p.GPIO2, &mut rmt_buffer);
 

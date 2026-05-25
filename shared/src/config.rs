@@ -8,8 +8,8 @@ pub struct SegmentConfig {
 }
 
 /// Per-node config. Phase 1: baked into the firmware binary.
-/// Phase 3: loaded from flash, provisioned over WiFi so a single firmware
-/// image runs on all boards.
+/// Later phases: loaded from flash, provisioned by the active control
+/// transport so a single firmware image runs on all boards.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NodeConfig {
     pub node_id: u16,

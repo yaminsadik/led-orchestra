@@ -2,8 +2,9 @@
 
 Distributed addressable-LED light show. Up to 20 × ESP32-C6 nodes each drive
 a WS2812B (NeoPixel) strip segment; together the segments form one virtual
-strip. A Rust CLI controller is the source of truth for layout, scene, mode,
-groups, and overrides.
+strip. The current Rust WiFi/UDP path is the known-good fallback. The next
+prototype track adds ESP-Matter over Thread so the installation can run as an
+offline local mesh with a dedicated controller node.
 
 ## Layout
 
@@ -12,6 +13,7 @@ groups, and overrides.
 | `shared/`     | `no_std` protocol types, `Effect` trait, effect implementations       | host + ESP RISC-V targets             |
 | `firmware/`   | esp-hal + esp-hal-smartled firmware for one ESP32-C6 node             | `riscv32imac-unknown-none-elf`        |
 | `controller/` | clap CLI (`loctl`) for sending commands and inspecting state          | host                                  |
+| `matter-prototype/` | ESP-IDF/ESP-Matter prototype apps for Thread LED/controller nodes | `esp32c6` via ESP-IDF |
 
 `shared/` is pulled in by both `firmware/` and `controller/` so effects, the
 effect-name registry, and the `NodeConfig` struct are defined exactly once.
@@ -28,6 +30,10 @@ files.
   the controller and firmware.
 - [Roadmap](docs/roadmap.md) — phase-by-phase acceptance criteria and the
   recommended next implementation slice.
+- [Matter/Thread plan](docs/matter-thread.md) — ESP-Matter over Thread tradeoffs,
+  prototype roles, custom cluster contract, and OTA direction.
+- [Handoff](docs/handoff.md) — current project state, key decisions, and
+  commands for a new Codex chat.
 
 ## Architectural rules
 
@@ -37,14 +43,14 @@ files.
 2. **Effects are pure functions.** No per-node state. Identical inputs ⇒
    identical pixels everywhere — this is how nodes stay visually in sync
    without sample-accurate clocks (just a shared time origin).
-3. **Nodes are independent.** A node that loses WiFi keeps running its last
-   valid scene locally. When it reconnects, the controller resends scene +
-   segment metadata + sync clock. Missing nodes are marked offline; the show
-   keeps going on the rest of the strip.
+3. **Nodes are independent.** A node that loses network contact keeps running
+   its last valid scene locally. When it reconnects, the controller resends
+   scene + segment metadata + sync clock. Missing nodes are marked offline;
+   the show keeps going on the rest of the strip.
 4. **Override priority** (highest wins):
    `emergency > segment > group > global`.
 5. **Adding a new effect** = new file in `shared/src/effects/`, add the
-   variant in `EffectId`, register it in `EffectRegistry`. Phase 7 (OTA) will
+   variant in `EffectId`, register it in `EffectRegistry`. Later OTA work will
    let new effect code reach nodes without a USB cable.
 
 ## Hardware
@@ -71,7 +77,7 @@ rustup target add riscv32imac-unknown-none-elf
 cargo install espflash
 ```
 
-### Firmware (per board)
+### Rust WiFi Firmware Fallback (per board)
 
 Create a local ignored credentials file:
 
@@ -95,6 +101,35 @@ or unplug the boards you are not flashing.
 Environment variables still override `firmware/.env` when both are set. If
 neither is set, the firmware renders the Phase 1 fallback rainbow locally, but
 it does not start the Phase 2 UDP receiver.
+
+### ESP-Matter/Thread Prototype
+
+The Matter/Thread path is intentionally separate from the working Rust firmware
+until it proves out on hardware. Start with `matter-prototype/README.md`; the
+initial LED-node and controller-node ESP-IDF app skeletons already exist there,
+but they still need first `idf.py` build validation and hardware testing.
+
+Prototype goals:
+
+- LED node: ESP32-C6 Matter-over-Thread device with a custom LED Orchestra
+  cluster and WS2812 output.
+- Controller node: ESP32-C6 Matter controller/commissioner with USB serial
+  operator ingress, local scene state, and controller-hosted OTA images.
+- First fabric: private development Matter fabric with generated per-device
+  factory data and test/dev credentials.
+
+Expected first-build commands once ESP-IDF is installed and exported:
+
+```bash
+. "$IDF_PATH/export.sh"
+cd matter-prototype/led-node
+idf.py set-target esp32c6
+idf.py build
+
+cd ../controller-node
+idf.py set-target esp32c6
+idf.py build
+```
 
 ### Controller
 
@@ -127,16 +162,13 @@ packet targets this node.
 ## Phase status
 
 - [x] **Phase 1** — One ESP32-C6 drives one strip with one effect
-- [ ] Phase 2 — Controller sends commands to one node over WiFi
-  - Controller UDP send path and shared packet protocol are in place.
-  - Firmware WiFi join + UDP receive loop builds.
-  - Controller UDP send path supports LAN broadcast.
-  - Firmware now targets ESP32-C6 only.
-  - C6 WiFi startup currently stalls during WiFi station interface creation.
-  - Physical LED response confirmation remains.
-  - See [Roadmap](docs/roadmap.md#phase-2-controller-to-one-node-over-wifi).
-- [ ] Phase 3 — Per-node segment config for 20 boards
-- [ ] Phase 4 — Global synced effects (time sync across nodes)
-- [ ] Phase 5 — Modes, groups, scenes, override priority
-- [ ] Phase 6 — Terminal control panel (ratatui)
-- [ ] Phase 7 — OTA firmware updates
+- [x] **Phase 2** — Controller sends commands to one node over WiFi
+  - Confirmed on ESP32-C6 hardware: WiFi join, UDP `4242`, controller command,
+    and visible LED response.
+- [ ] Phase 3 — ESP-Matter/Thread feasibility prototype
+  - Initial ESP-IDF LED-node and controller-node apps are scaffolded under
+    `matter-prototype/`; first `idf.py` build and hardware validation remain.
+- [ ] Phase 4 — Multi-node offline Thread mesh
+- [ ] Phase 5 — Segment config and synchronized effects over Matter
+- [ ] Phase 6 — Offline OTA through the controller node
+- [ ] Phase 7 — Operator UX beyond USB serial
