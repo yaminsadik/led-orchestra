@@ -1,12 +1,6 @@
 #![no_std]
 #![no_main]
 
-#[cfg(all(feature = "chip-esp32c3", feature = "chip-esp32c6"))]
-compile_error!("Select exactly one firmware chip feature: chip-esp32c3 or chip-esp32c6.");
-
-#[cfg(not(any(feature = "chip-esp32c3", feature = "chip-esp32c6")))]
-compile_error!("Select a firmware chip feature: chip-esp32c3 or chip-esp32c6.");
-
 mod node_config;
 
 use core::sync::atomic::{AtomicU8, Ordering};
@@ -124,9 +118,9 @@ async fn main(spawner: Spawner) -> ! {
     let mut rmt_buffer = smart_led_buffer!(LED_COUNT);
 
     // The HAL exposes each GPIO as a distinct typed singleton, so we can't
-    // pick one at runtime from a `u8`. Phase 3 will introduce per-board build
-    // features (or a typed wrapper) so `NODE.led_gpio_pin` actually drives
-    // this choice. For now we hardcode GPIO2 and document the override.
+    // pick one at runtime from a `u8`. Phase 3 will introduce per-board config
+    // or a typed wrapper so `NODE.led_gpio_pin` actually drives this choice.
+    // For now we hardcode GPIO2 and document the override.
     let mut strip = SmartLedsAdapter::new(rmt.channel0, p.GPIO2, &mut rmt_buffer);
 
     let ctx = EffectContext {

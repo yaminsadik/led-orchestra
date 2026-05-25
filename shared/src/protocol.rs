@@ -2,7 +2,7 @@
 //!
 //! Phase 2 uses UDP as the transport, but this module deliberately only knows
 //! about bytes. That keeps the packet contract usable from both `std` host code
-//! and `no_std` ESP32-C3 firmware.
+//! and `no_std` ESP32-C6 firmware.
 
 use core::fmt;
 

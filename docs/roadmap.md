@@ -4,14 +4,14 @@ This roadmap turns the README phases into acceptance criteria. A phase is done
 when the listed behavior works on real hardware or, for controller-only pieces,
 through a repeatable local command.
 
-## Phase 1: One ESP32-C3 Drives One Strip
+## Phase 1: One ESP32-C6 Drives One Strip
 
 Status: done.
 
 Acceptance criteria:
 
-- Firmware builds for `riscv32imc-unknown-none-elf`.
-- One ESP32-C3 drives one WS2812B strip from GPIO2.
+- Firmware builds for `riscv32imac-unknown-none-elf`.
+- One ESP32-C6 drives one WS2812B strip from GPIO2.
 - The baked-in scene renders continuously without a controller.
 - Effects come from `shared/`, not firmware-local copies.
 
@@ -23,20 +23,19 @@ Already done:
 
 - `shared::SetScenePacket` defines a fixed-width `no_std` scene packet.
 - `loctl all solid`, `loctl all effect`, and `loctl all off` send UDP packets.
-- Firmware joins WiFi when credentials are provided by build-time environment
-  variables or an ignored `firmware/.env` file.
-- Firmware listens for UDP datagrams on port `4242`.
-- Firmware decodes `SetScenePacket`, ignores packets for other node ids, and
-  swaps the active scene after a valid targeted or broadcast packet.
+- Firmware has code to join WiFi when credentials are provided by build-time
+  environment variables or an ignored `firmware/.env` file.
+- Firmware has a UDP receiver for datagrams on port `4242`.
+- Firmware has code to decode `SetScenePacket`, ignore packets for other node
+  ids, and swap the active scene after a valid targeted or broadcast packet.
 - The board keeps rendering the last valid scene while disconnected.
 - Controller-side packet and parsing tests pass.
-- Real ESP32-C3 flash succeeds, and the firmware accepts UDP scene packets over
-  LAN broadcast.
-- Firmware can be built separately for ESP32-C3 and ESP32-C6 from the same
-  source tree.
+- ESP32-C6 flashing works over USB.
+- Firmware is C6-only; the old alternate chip build path has been removed.
 
 Remaining acceptance criteria:
 
+- Resolve the current ESP32-C6 stall during WiFi station interface creation.
 - Confirm a real controller command changes the physical LEDs.
 - An operator can run:
 
@@ -50,15 +49,14 @@ cargo run -- --bus udp://192.168.1.255:4242 --target-node 1 all solid ff0000
 
 Recommended next implementation slice:
 
-1. Confirm the physical strip changes after the accepted UDP packets.
-2. Use LAN broadcast if unicast reports `No route to host`.
-3. Flash and smoke-test the ESP32-C6 build on one board.
+1. Resolve the ESP32-C6 WiFi station interface stall.
+2. Confirm the physical strip changes after accepted UDP packets.
+3. Use LAN broadcast if unicast reports `No route to host`.
 4. Mark Phase 2 done after the physical LEDs respond.
 
 ## Phase 3: Per-Node Segment Config For 20 Boards
 
-Goal: one firmware codebase can provision every node, with separate chip builds
-where the hardware target requires them.
+Goal: one ESP32-C6 firmware codebase can provision every node.
 
 Acceptance criteria:
 
