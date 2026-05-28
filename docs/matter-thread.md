@@ -1,12 +1,13 @@
 # Matter/Thread Prototype Plan
 
-This document captures the new ESP32-C6-only offline mesh direction. The
-existing Rust WiFi/UDP firmware remains the known-good fallback while this path
-is proven separately.
+This document captures the ESP32-C6-only offline mesh direction. The completed
+Rust WiFi/UDP Phase 1/2 implementation is archived on
+`archive/rust-phase-2`; `main` now carries the C++ ESP-IDF/ESP-Matter path.
 
-Current state: initial ESP-IDF app skeletons exist under `matter-prototype/`
-for both the LED node and the controller node. They still need first `idf.py`
-build validation and hardware testing.
+Current state: ESP-IDF apps exist under `matter-prototype/` for both the LED
+node and the controller node. Both build for ESP32-C6. One LED node has been
+flashed; controller-node flashing, commissioning, and end-to-end hardware
+validation remain.
 
 ## Decision
 
@@ -20,8 +21,8 @@ Use ESP-Matter over Thread for the next prototype:
   Matter certification effort.
 - Operator ingress is USB serial into a dedicated controller node.
 
-The prototype should be built with ESP-IDF/ESP-Matter instead of trying to
-incrementally graft Matter onto the current `no_std` Rust firmware.
+The prototype is C++ because ESP-Matter and the intended FastLED rendering
+stack are C++-native.
 
 ## Prototype Roles
 
@@ -31,6 +32,8 @@ incrementally graft Matter onto the current `no_std` Rust firmware.
 - Owns one physical WS2812B segment.
 - Implements a vendor custom LED Orchestra cluster.
 - Renders the last valid scene locally when the controller is unreachable.
+- Uses the existing ESP-IDF `led_strip` renderer until a FastLED spike proves
+  the final C++ rendering path inside the ESP-Matter app.
 - Enables Matter OTA Requestor in the OTA phase.
 
 ### Controller Node
@@ -72,12 +75,17 @@ Compatibility rules:
 - Add new effect ids only at the end.
 - Keep the controller responsible for resolving scene priority before sending
   commands to LED nodes.
+- Deliver new compiled LED modes through firmware OTA in Phase 6. Runtime
+  effect plugins or scripts are a separate future design.
 
 Prototype implementation notes:
 
 - Cluster id is currently `0xFFF1FC00`, using a development vendor id.
-- The LED node renders `off`, `solid`, and `rainbow` using ESP-IDF
+- The LED node currently renders `off`, `solid`, and `rainbow` using ESP-IDF
   `led_strip`.
+- FastLED should be evaluated as a C++ component before replacing `led_strip`.
+  Its ESP-IDF CMake path currently expects Arduino-ESP32 integration, so this
+  needs explicit build and hardware validation with ESP-Matter on ESP32-C6.
 - `SetNodeConfig` is RAM-only in Phase 3. Durable NVS storage is planned for
   Phase 5.
 - The controller node registers USB shell helpers: `lo-set-scene`,
@@ -114,6 +122,10 @@ Prototype OTA target:
   local Matter/Thread fabric.
 - Use signed and encrypted OTA images for the prototype.
 - Reject invalid or wrong-key images and verify rollback/recovery.
+- For development, use private/test Matter credentials and generated factory
+  data. Before production or public Matter ecosystem use, move to a proper
+  Matter identity, protected attestation keys, secure boot, flash encryption,
+  and documented manufacturing/certification choices.
 
 ## References
 

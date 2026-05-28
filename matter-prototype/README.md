@@ -1,7 +1,8 @@
 # Matter Prototype
 
-This directory is the ESP-IDF/ESP-Matter prototype lane for LED Orchestra. It is
-separate from the working Rust WiFi/UDP firmware in `firmware/`.
+This directory is the active C++ ESP-IDF/ESP-Matter prototype lane for LED
+Orchestra. The completed Rust WiFi/UDP Phase 1/2 implementation is archived on
+the `archive/rust-phase-2` branch.
 
 ## Target
 
@@ -9,6 +10,8 @@ separate from the working Rust WiFi/UDP firmware in `firmware/`.
 - Network: Matter over Thread using the ESP32-C6 802.15.4 radio.
 - Fabric: private development Matter fabric.
 - Operator ingress: USB serial to the controller node.
+- Renderer: ESP-IDF `led_strip` now; FastLED after a focused ESP32-C6 +
+  ESP-Matter integration spike.
 - OTA: controller-node-hosted images after the LED-node control path works.
 
 ## Layout
@@ -33,10 +36,13 @@ separate from the working Rust WiFi/UDP firmware in `firmware/`.
   - `lo-set-scene`
   - `lo-set-node-config`
   - `lo-sync-clock`
+- Both LED-node and controller-node apps build for ESP32-C6.
+- One LED-node image has been flashed successfully to hardware.
 
 ## Prototype Sequence
 
-1. Install/export ESP-IDF and ESP-Matter tooling.
+1. Install/export ESP-IDF and ESP-Matter tooling from
+   `../docs/requirements.md`.
 2. Build `led-node/` for `esp32c6`.
 3. Build `controller-node/` for `esp32c6`.
 4. Flash one LED node and one controller node.
@@ -44,11 +50,13 @@ separate from the working Rust WiFi/UDP firmware in `firmware/`.
 6. Commission the LED node into the private fabric.
 7. Run `lo-set-scene`; confirm physical LED response.
 8. Add a second LED node and test group scene commands.
-9. Add controller-node OTA image storage and LED-node OTA requestor support.
+9. Validate FastLED inside the LED-node app and promote it to the rendering
+   layer if it works cleanly with ESP-Matter on ESP32-C6.
+10. Add controller-node OTA image storage and LED-node OTA requestor support.
 
-The ESP-IDF toolchain was not available in the local shell when this scaffold
-was created, so the Matter apps still need first-build validation with
-`idf.py`.
+The remaining Phase 3 hardware risk is whether the ESP-Matter controller stack
+works as a Thread-only ESP32-C6 controller, or whether the controller app needs
+a clearer OpenThread border-router/controller role.
 
 ## Build Commands
 
@@ -73,10 +81,6 @@ lo-set-scene 1 1 2 000000 128 40
 lo-sync-clock 1 1
 ```
 
-Keep the Rust fallback tests passing while this prototype evolves:
-
-```bash
-cd firmware && cargo build --release
-cd ../shared && cargo test
-cd ../controller && cargo test
-```
+New LED modes are expected to ship as compiled firmware updates through Matter
+OTA in Phase 6. Runtime-loadable scripts/plugins are outside the current phase
+plan.

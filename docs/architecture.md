@@ -4,18 +4,18 @@ LED Orchestra is a distributed LED renderer. Each ESP32-C6 node owns one
 physical strip segment, while a controller owns the show state and sends
 commands over the active network path.
 
-## Crates
+## Project Layout
 
-| Crate | Role |
+| Path | Role |
 | --- | --- |
-| `shared/` | `no_std` contract shared by firmware and controller: colors, effects, node config, and packet encoding. |
-| `firmware/` | Known-good Rust WiFi/UDP ESP32-C6 runtime that renders one segment and listens for controller packets. |
-| `controller/` | Host CLI (`loctl`) that lists effects and sends show commands over UDP for the WiFi fallback path. |
 | `matter-prototype/` | ESP-IDF/ESP-Matter prototype lane for Thread LED nodes, a dedicated controller node, custom cluster, and offline OTA. |
+| `matter-prototype/led-node/` | C++ LED-node app that exposes the LED Orchestra custom cluster and renders one physical strip segment. |
+| `matter-prototype/controller-node/` | C++ controller/commissioner app with USB serial operator ingress. |
+| `matter-prototype/common/` | Shared C++ constants for the custom cluster and effect ids. |
 
-The project intentionally has no top-level Cargo workspace. The firmware and
-controller target different platforms, use different lock files, and should be
-buildable independently.
+The completed Rust WiFi/UDP Phase 1/2 implementation is archived on the
+`archive/rust-phase-2` branch. `main` should stay focused on the C++
+ESP-IDF/ESP-Matter path.
 
 ## Runtime Model
 
@@ -33,14 +33,6 @@ global LED index, so a rainbow or wave can flow across board boundaries.
 
 ## Command Flow
 
-Known-good Phase 2 fallback path:
-
-```text
-operator -> loctl -> UDP SetScenePacket -> ESP32 node -> ActiveScene -> LEDs
-```
-
-Matter/Thread prototype path:
-
 ```text
 operator -> USB serial -> controller node -> Matter custom cluster over Thread -> LED nodes -> LEDs
 ```
@@ -51,16 +43,12 @@ drops.
 
 ## Transport Strategy
 
-The Rust WiFi/UDP path stays intact because it is already confirmed on hardware
-and is useful for regression, debugging, and fallback operation.
-
-The new offline mesh path is intentionally separate:
-
 - Matter is the application/security/controller model.
 - Thread/OpenThread is the offline IPv6 mesh carried by the ESP32-C6 802.15.4
   radio.
-- ESP-Matter is ESP-IDF/C++ oriented, so the first prototype should not rewrite
-  or destabilize the Rust firmware.
+- ESP-Matter is ESP-IDF/C++ oriented, so Phase 3 onward is implemented in C++.
+- FastLED is the intended rendering/effect library after an ESP32-C6 +
+  ESP-Matter integration spike proves the build/runtime path.
 - The first Matter fabric is private development only, with generated
   per-device factory data and test/dev credentials.
 
@@ -69,10 +57,9 @@ The new offline mesh path is intentionally separate:
 - Effects are pure functions of `(global_index, time_ms, params, context)`.
 - Nodes do not need per-effect mutable state to stay visually aligned.
 - Every production LED node is ESP32-C6.
-- Effect ids remain stable across the UDP fallback and Matter custom cluster.
+- Effect ids are append-only and remain stable across Matter commands and OTA
+  updates.
 - The controller resolves priority before nodes render.
-- A node ignores packets for other node ids.
-- A broadcast target node id of `0` applies to every node.
 - Firmware keeps the last valid scene if a bad command arrives or network
   contact is lost.
 
@@ -115,12 +102,13 @@ are commissioned. Keep provisioning and per-node config unicast-only.
 
 ## Adding An Effect
 
-1. Add a new effect implementation under `shared/src/effects/`.
-2. Add a stable variant to `EffectId`.
-3. Assign a never-reused wire id in `EffectId::wire_id`.
-4. Add the reverse mapping in `EffectId::from_wire_id`.
-5. Register the effect in `EffectRegistry`.
-6. Verify `cd shared && cargo test` and `cd controller && cargo test`.
+1. Add a stable C++ effect id at the end of the effect-id list.
+2. Add the LED-node renderer implementation, preferably using FastLED once the
+   integration spike is accepted.
+3. Add controller command parsing/help if the effect needs new parameters.
+4. Keep the Matter custom-cluster command contract stable unless the new effect
+   truly needs new fields.
+5. Build both ESP-IDF apps and validate the effect on physical LEDs.
 
 Do not reorder or reuse wire ids. Nodes and controllers may be updated at
 different times, especially after OTA support exists.

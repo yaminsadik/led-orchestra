@@ -1,8 +1,0 @@
-[package]
-name = "led-orchestra-shared"
-version = "0.1.0"
-edition = "2021"
-description = "Shared protocol types, Effect trait, and effect implementations for LED Orchestra"
-license = "MIT OR Apache-2.0"
-
-[dependencies]
