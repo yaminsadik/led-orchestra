@@ -77,6 +77,9 @@ Compatibility rules:
   commands to LED nodes.
 - Deliver new compiled LED modes through firmware OTA in Phase 6. Runtime
   effect plugins or scripts are a separate future design.
+- Treat effect CRUD conservatively: list effects and update parameters at
+  runtime; add or change effect code through OTA; hide/deprecate old effects
+  instead of reusing their ids.
 
 Prototype implementation notes:
 

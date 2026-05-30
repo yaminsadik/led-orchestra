@@ -95,6 +95,20 @@ Status: planned.
 Goal: make the Matter controller node the source of truth for node config and
 effect timing.
 
+Effect-management decision:
+
+- FastLED should provide the early effect library; do not build a large custom
+  effect engine until FastLED is proven insufficient.
+- "Create" means adding a compiled C++/FastLED effect with a new stable
+  append-only `effect_id`.
+- "Read" means the controller can list supported effects, firmware version, and
+  basic parameter metadata.
+- "Update" means changing live parameters such as color, speed, brightness,
+  palette, direction, and timing; changing effect code ships through OTA.
+- "Delete" should normally mean hide or deprecate an effect. Never reuse an old
+  `effect_id` for different behavior.
+- Runtime-uploaded effect scripts/plugins are not part of Phase 5 or Phase 6.
+
 Acceptance criteria:
 
 - Controller node provisions durable `NodeConfig` with `SetNodeConfig`.
