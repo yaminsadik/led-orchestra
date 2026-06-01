@@ -1,0 +1,100 @@
+menu "LED Orchestra Controller"
+
+    choice LED_ORCHESTRA_OPERATOR_WIFI_MODE
+        prompt "Operator Wi-Fi ingress mode"
+        default LED_ORCHESTRA_OPERATOR_WIFI_MODE_AP
+        help
+            Select how laptop/mobile clients reach the controller node over
+            Wi-Fi. USB serial is always the baseline ingress. LED nodes remain
+            controlled over Thread/Matter by the controller node.
+
+        config LED_ORCHESTRA_OPERATOR_WIFI_MODE_DISABLED
+            bool "Disabled"
+
+        config LED_ORCHESTRA_OPERATOR_WIFI_MODE_AP
+            bool "Private controller AP"
+
+        config LED_ORCHESTRA_OPERATOR_WIFI_MODE_STA
+            bool "Station on private/local network"
+    endchoice
+
+    config ENABLE_WIFI_AP
+        bool
+        default n
+        help
+            CHIP/ESP32 Wi-Fi commissioning softAP. This MUST stay disabled for
+            the LED Orchestra controller. Enabling it makes
+            CHIP_DEVICE_CONFIG_ENABLE_WIFI non-zero, which hands the Wi-Fi
+            interface to the Matter connectivity manager. Because this node
+            commissions over Thread, CHIP then forces the radio to STA and stops
+            the AP. The operator ingress AP is a standalone esp_wifi softAP in
+            controller_wifi_ingress.cpp and does not use this CHIP option.
+
+    config ENABLE_WIFI_TELEMETRY
+        bool
+        default n
+
+    config WIFI_STATION_RECONNECT_INTERVAL
+        int
+        default 100
+
+    config MAX_SCAN_NETWORKS_RESULTS
+        int
+        default 10
+
+    config WIFI_SCAN_COMPLETION_TIMEOUT
+        int
+        default 10000
+
+    config WIFI_CONNECTIVITY_TIMEOUT
+        int
+        default 30000
+
+    config DEFAULT_WIFI_SSID
+        string
+        default ""
+
+    config DEFAULT_WIFI_PASSWORD
+        string
+        default ""
+
+    config LED_ORCHESTRA_WIFI_AP_SSID
+        string "Controller AP SSID"
+        depends on LED_ORCHESTRA_OPERATOR_WIFI_MODE_AP
+        default "led-orchestra-setup"
+        help
+            Placeholder fallback only. Set the real SSID in the gitignored
+            sdkconfig.defaults.local (see sdkconfig.defaults.local.example).
+
+    config LED_ORCHESTRA_WIFI_AP_PASSWORD
+        string "Controller AP password"
+        depends on LED_ORCHESTRA_OPERATOR_WIFI_MODE_AP
+        default ""
+        help
+            Leave empty here. Set a STRONG password (8-63 chars for WPA2-PSK) in
+            the gitignored sdkconfig.defaults.local. An empty password falls back
+            to an open development AP and must not be used operationally.
+
+    config LED_ORCHESTRA_WIFI_AP_CHANNEL
+        int "Controller AP channel"
+        depends on LED_ORCHESTRA_OPERATOR_WIFI_MODE_AP
+        range 1 13
+        default 6
+
+    config LED_ORCHESTRA_WIFI_AP_MAX_CONNECTIONS
+        int "Controller AP max clients"
+        depends on LED_ORCHESTRA_OPERATOR_WIFI_MODE_AP
+        range 1 8
+        default 4
+
+    config LED_ORCHESTRA_WIFI_STA_SSID
+        string "Station SSID"
+        depends on LED_ORCHESTRA_OPERATOR_WIFI_MODE_STA
+        default ""
+
+    config LED_ORCHESTRA_WIFI_STA_PASSWORD
+        string "Station password"
+        depends on LED_ORCHESTRA_OPERATOR_WIFI_MODE_STA
+        default ""
+
+endmenu

@@ -12,6 +12,7 @@
 #include "esp_ot_config.h"
 #endif
 
+#include "controller_wifi_ingress.h"
 #include "led_orchestra_console.h"
 
 static const char *TAG = "lo_controller";
@@ -44,6 +45,8 @@ extern "C" void app_main()
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+
+    ESP_ERROR_CHECK(controller_wifi_ingress_start());
 
 #if CONFIG_ENABLE_CHIP_SHELL
     esp_matter::console::diagnostics_register_commands();

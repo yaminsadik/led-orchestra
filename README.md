@@ -3,7 +3,27 @@
 Distributed addressable-LED light show. Up to 20 ESP32-C6 nodes each drive a
 WS2812B/NeoPixel strip segment; together the segments form one virtual strip.
 The active implementation path is C++ on ESP-IDF/ESP-Matter over Thread so the
-installation can run as an offline local mesh with a dedicated controller node.
+installation can run as a fully offline local mesh with a dedicated controller
+node.
+
+The first prototype needs no venue Wi-Fi, cloud, or internet. USB is the
+baseline operator path, and the controller node hosts a private Wi-Fi AP by
+default for laptop/mobile convenience:
+
+```text
+USB laptop OR controller-local Wi-Fi laptop/mobile
+  -> ESP32-C6 controller node
+     (Matter controller + commissioner, scene source of truth)
+  -> Thread/Matter mesh
+  -> ESP32-C6 LED nodes
+     (Matter-over-Thread devices, LED renderers)
+```
+
+The laptop/mobile is operator input only; the controller node is the Matter
+controller/commissioner. LED nodes are operated and controlled through Thread by
+the controller node. See
+[Architecture](docs/architecture.md#roles-and-responsibilities) for the full
+role glossary and diagram.
 
 The completed Rust WiFi/UDP Phase 1/2 implementation is archived on the
 `archive/rust-phase-2` branch. Keep `main` focused on the C++ Matter/Thread
@@ -14,7 +34,7 @@ prototype and later production path.
 | Path | What it is | Build target |
 | --- | --- | --- |
 | `matter-prototype/led-node/` | ESP-IDF/ESP-Matter LED node for one physical strip segment | `esp32c6` via ESP-IDF |
-| `matter-prototype/controller-node/` | ESP-IDF/ESP-Matter controller/commissioner with USB serial ingress | `esp32c6` via ESP-IDF |
+| `matter-prototype/controller-node/` | ESP-IDF/ESP-Matter controller/commissioner with USB serial ingress and controller-local Wi-Fi ingress | `esp32c6` via ESP-IDF |
 | `matter-prototype/common/` | Shared C++ constants for cluster ids, command ids, tags, and effect ids | included by both apps |
 | `matter-prototype/cluster/` | Human-readable LED Orchestra custom cluster contract | docs |
 
@@ -79,9 +99,12 @@ The required ESP-IDF/ESP-Matter install and per-shell export steps are in
 Prototype goals:
 
 - LED node: ESP32-C6 Matter-over-Thread device with a custom LED Orchestra
-  cluster and WS2812 output.
-- Controller node: ESP32-C6 Matter controller/commissioner with USB serial
-  operator ingress, local scene state, and later controller-hosted OTA images.
+  cluster and WS2812 output. Later acts as a Matter OTA Requestor.
+- Controller node: ESP32-C6 Matter controller/commissioner and local source of
+  truth for scenes, node inventory, and groups. It takes operator intent (and
+  later OTA image bytes) over USB serial or the controller's private Wi-Fi AP.
+  Laptop/mobile clients are UI/operator ingress only — they are not the Matter
+  controller and hold no fabric credentials.
 - First fabric: private development Matter fabric with generated per-device
   factory data and test/dev credentials.
 - Rendering: start from the working ESP-IDF `led_strip` renderer, then validate
@@ -107,8 +130,9 @@ idf.py build
 - [x] **Phase 1/2** — Rust WiFi/UDP proof archived on `archive/rust-phase-2`
 - [ ] Phase 3 — C++ ESP-Matter/Thread feasibility prototype
   - LED-node and controller-node apps build; LED-node has been flashed once.
-    Controller flashing, commissioning, and physical Matter/Thread LED control
-    remain.
+    Controller-node has been flashed with USB serial plus private Wi-Fi AP
+    ingress and booted to its shell. Commissioning and physical Matter/Thread
+    LED control remain.
 - [ ] Phase 4 — Multi-node offline Thread mesh
 - [ ] Phase 5 — Segment config and synchronized FastLED effects over Matter
 - [ ] Phase 6 — Offline OTA through the controller node

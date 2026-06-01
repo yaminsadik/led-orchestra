@@ -1,4 +1,10 @@
 # ESP32-C6 dedicated Matter controller-node prototype target.
+# This node is the Matter controller/commissioner and local source of truth.
+# USB serial is the baseline operator ingress; controller-local Wi-Fi is planned
+# as a convenience ingress for laptop/mobile clients. LED nodes remain operated
+# over Thread/Matter by this controller, with no internet requirement. In Phase
+# 6 this node also becomes the Matter OTA Provider for operator-loaded
+# signed/encrypted images.
 CONFIG_IDF_TARGET="esp32c6"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
@@ -12,8 +18,29 @@ CONFIG_OPENTHREAD_DNS_CLIENT=y
 CONFIG_OPENTHREAD_LOG_LEVEL_NOTE=y
 CONFIG_OPENTHREAD_CLI=y
 
+# Default operator Wi-Fi ingress is a private AP hosted by the controller node.
+# USB serial remains the recovery/baseline ingress. Station mode is supported by
+# the project Kconfig for private/local network deployments, but should be
+# enabled deliberately with an SSID/password after the venue network constraints
+# are known. LED nodes remain Thread/Matter devices.
+# The operator AP is a standalone esp_wifi softAP (controller_wifi_ingress.cpp).
+# CHIP's own Wi-Fi must stay OFF: ENABLE_WIFI_AP/STATION both off keep
+# CHIP_DEVICE_CONFIG_ENABLE_WIFI==0 so the Matter connectivity manager never
+# grabs the radio and forces STA (which would stop our AP). LED nodes are
+# commissioned and controlled over Thread.
+CONFIG_ESP_WIFI_ENABLED=y
+CONFIG_LED_ORCHESTRA_OPERATOR_WIFI_MODE_AP=y
+CONFIG_ENABLE_WIFI_AP=n
 CONFIG_ENABLE_WIFI_STATION=n
 CONFIG_USE_MINIMAL_MDNS=n
+
+# Operator AP SSID/password are intentionally NOT set here. They live in the
+# gitignored sdkconfig.defaults.local (see sdkconfig.defaults.local.example) so
+# credentials never enter version control.
+CONFIG_LED_ORCHESTRA_WIFI_AP_CHANNEL=6
+CONFIG_LED_ORCHESTRA_WIFI_AP_MAX_CONNECTIONS=4
+CONFIG_DEFAULT_WIFI_SSID=""
+CONFIG_DEFAULT_WIFI_PASSWORD=""
 
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"

@@ -10,7 +10,10 @@ segment and exposes the LED Orchestra custom cluster.
 - Commissions into the private development fabric.
 - Receives `SetScene` over Matter and changes the physical LEDs.
 - Keeps rendering the last valid scene when the controller is unreachable.
-- Later: enables Matter OTA Requestor and accepts signed/encrypted OTA images.
+- Later (Phase 6): acts as a Matter OTA Requestor — downloads a signed and
+  encrypted image from the controller-node OTA Provider over the offline fabric,
+  verifies/decrypts it, and applies it. Matter fabric credentials and image
+  signing/encryption are separate security layers.
 
 ## Implemented Slice
 

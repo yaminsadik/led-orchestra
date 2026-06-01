@@ -7,12 +7,23 @@ the `archive/rust-phase-2` branch.
 ## Target
 
 - Hardware: ESP32-C6 only.
-- Network: Matter over Thread using the ESP32-C6 802.15.4 radio.
+- Network: Matter over Thread using the ESP32-C6 802.15.4 radio for LED-node
+  control. No venue Wi-Fi, cloud, or internet is required.
 - Fabric: private development Matter fabric.
-- Operator ingress: USB serial to the controller node.
+- Matter controller/commissioner: the dedicated ESP32-C6 controller node (the
+  local source of truth for scenes, node inventory, and groups).
+- UI / operator ingress: USB serial plus controller-local Wi-Fi for
+  laptop/mobile convenience. The controller defaults to a private AP whose
+  SSID/password are set in the gitignored `sdkconfig.defaults.local`; station
+  mode is an explicit build-time option for private/local networks.
+  Laptop/mobile clients are **not** the Matter controller and hold no fabric
+  credentials.
 - Renderer: ESP-IDF `led_strip` now; FastLED after a focused ESP32-C6 +
   ESP-Matter integration spike.
-- OTA: controller-node-hosted images after the LED-node control path works.
+- OTA (Phase 6): operator loads a signed/encrypted image over USB serial or
+  controller-local Wi-Fi; the controller node is the local Matter OTA Provider;
+  LED nodes are Matter OTA Requestors. Matter fabric credentials and image
+  signing/encryption are separate security layers.
 
 ## Layout
 
@@ -38,6 +49,8 @@ the `archive/rust-phase-2` branch.
   - `lo-sync-clock`
 - Both LED-node and controller-node apps build for ESP32-C6.
 - One LED-node image has been flashed successfully to hardware.
+- One controller-node image has been flashed with USB serial plus private Wi-Fi
+  AP ingress and booted to the controller shell.
 
 ## Prototype Sequence
 
@@ -54,9 +67,11 @@ the `archive/rust-phase-2` branch.
    layer if it works cleanly with ESP-Matter on ESP32-C6.
 10. Add controller-node OTA image storage and LED-node OTA requestor support.
 
-The remaining Phase 3 hardware risk is whether the ESP-Matter controller stack
-works as a Thread-only ESP32-C6 controller, or whether the controller app needs
-a clearer OpenThread border-router/controller role.
+The remaining Phase 3 hardware risk is whether ESP-Matter supports a Thread-side
+embedded controller on ESP32-C6, or whether the controller path needs an
+explicit OpenThread Border Router role. Either outcome keeps LED nodes
+controlled through Thread by the controller node. Controller-local Wi-Fi is an
+operator ingress choice, not LED-node transport or an internet dependency.
 
 ## Build Commands
 

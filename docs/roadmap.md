@@ -41,9 +41,39 @@ it is no longer carried on `main`.
 ## Phase 3: C++ ESP-Matter/Thread Feasibility Prototype
 
 Status: in progress. ESP-IDF LED-node and controller-node apps exist under
-`matter-prototype/` and build for ESP32-C6. One LED-node image has been flashed;
-controller-node flashing, commissioning, and end-to-end Matter/Thread LED
-control remain.
+`matter-prototype/` and build for ESP32-C6. One LED-node image has been flashed.
+The controller-node image now boots with both operator ingress paths confirmed on
+hardware: the USB serial/JTAG controller shell reaches `LED Orchestra controller
+node ready`, and the controller-local private Wi-Fi AP ingress works end to end (a
+laptop/phone can see and join the AP). Commissioning and end-to-end Matter/Thread
+LED control remain.
+
+Confirmed on hardware so far:
+
+- Controller boots to `LED Orchestra controller node ready` over USB serial/JTAG.
+- The standalone operator Wi-Fi softAP (SSID/password from the gitignored
+  `sdkconfig.defaults.local`, channel 6) starts, stays up, and is
+  visible/joinable from a laptop.
+- OpenThread starts (`device type ROUTER`) and the controller joins fabric
+  index 1.
+
+Key fix found during hardware bring-up:
+
+- CHIP's `ENABLE_WIFI_AP`/`ENABLE_WIFI_STATION` must stay **off** on the
+  controller. With `ENABLE_WIFI_AP` on, `CHIP_DEVICE_CONFIG_ENABLE_WIFI` became
+  non-zero, so the Matter connectivity manager seized the Wi-Fi radio, forced it
+  to STA, and stopped the operator AP (`WIFI_EVENT_AP_STOP`) right after boot. The
+  operator AP is now a standalone `esp_wifi` softAP
+  (`matter-prototype/controller-node/main/controller_wifi_ingress.cpp`),
+  independent of Matter, which runs over Thread.
+
+Open issue surfaced by this work:
+
+- With CHIP Wi-Fi off and no Thread SRP server / border router present, Matter
+  DNS-SD advertising over IP errors at boot (`chip[DIS]: Failed to advertise
+  ... : 3`). Offline Thread discovery is expected to ride Thread SRP; this is
+  direct evidence for the open architecture risk below and must be resolved while
+  confirming the embedded-controller-over-Thread path.
 
 Goal: prove one LED node and one controller node using C++ ESP-Matter over
 Thread on ESP32-C6.
@@ -54,22 +84,34 @@ Acceptance criteria:
   `archive/rust-phase-2`.
 - One ESP32-C6 LED node builds in Thread mode and exposes the LED Orchestra
   custom Matter cluster.
-- One ESP32-C6 controller node builds with USB serial operator ingress.
+- One ESP32-C6 controller node builds with USB serial operator ingress and
+  controller-local Wi-Fi ingress. The default Wi-Fi mode is a private controller
+  AP; station mode is a deliberate build-time option for private/local networks.
 - The controller node commissions the LED node into a private development
   Matter fabric.
 - The controller node sends `SetScene` over Matter and the physical LEDs
   change.
 - A FastLED integration spike confirms whether FastLED can replace the current
   ESP-IDF `led_strip` renderer inside the ESP-Matter app on ESP32-C6.
+- Hardware validation answers the open risk: whether ESP-Matter supports a
+  Thread-side embedded controller on ESP32-C6, or whether the controller path
+  needs an explicit OpenThread Border Router role. Either outcome must keep LED
+  nodes controlled by the controller over Thread, with no internet requirement.
 
 Recommended next implementation slice:
 
-1. Plug in the controller ESP32-C6 and detect its serial port.
-2. Flash `matter-prototype/controller-node`.
-3. Open the controller serial monitor.
+1. ~~Open the controller serial monitor and confirm the AP-enabled image
+   boots.~~ Done: boots to `LED Orchestra controller node ready`.
+2. ~~Confirm the controller private operator AP appears.~~ Done: the AP is
+   visible and joinable from a laptop and stays up after the CHIP Wi-Fi fix.
+3. Resolve the Matter DNS-SD/Thread-SRP discovery errors (see open issue above)
+   far enough to attempt commissioning, or confirm commissioning works over BLE
+   despite them.
 4. Commission the flashed LED node into the private development fabric.
 5. Run `lo-set-scene` and confirm physical LEDs change over Matter/Thread.
-6. Confirm controller operation without venue WiFi/router/internet.
+6. Confirm controller operation without venue WiFi/router/internet. USB remains
+   the baseline ingress; controller-local Wi-Fi is allowed only as an operator
+   ingress path to the controller node.
 7. Spike FastLED inside the LED-node app and choose the first stable renderer
    backend for Phase 4.
 
@@ -77,7 +119,8 @@ Recommended next implementation slice:
 
 Status: planned.
 
-Goal: control multiple ESP32-C6 LED nodes with no venue WiFi/router/internet.
+Goal: control multiple ESP32-C6 LED nodes through the controller node over
+Thread, with no venue WiFi/router/internet requirement.
 
 Acceptance criteria:
 
@@ -125,15 +168,34 @@ Acceptance criteria:
 
 Status: planned.
 
-Goal: update commissioned LED nodes without USB and without internet.
+Goal: update commissioned LED nodes over the offline Matter/Thread fabric (no
+node-side USB cable, no internet).
+
+Flow:
+
+```text
+operator (laptop/mobile)
+  -> USB serial or controller-local Wi-Fi: signed + encrypted image
+  -> controller node: stores image, acts as Matter OTA Provider
+  -> Matter OTA over Thread
+  -> LED nodes: Matter OTA Requestors verify + decrypt + apply
+```
+
+The operator's laptop/phone is only ingress for the image bytes; it never joins
+the Matter fabric. USB serial is the required recovery/baseline path, and
+controller-local Wi-Fi is an allowed convenience path. Matter fabric credentials
+(who may use the OTA cluster) and firmware image signing/encryption (what
+firmware a node will run) are separate security layers.
 
 Acceptance criteria:
 
-- Controller node accepts an OTA image over USB serial.
-- LED nodes enable Matter OTA Requestor.
-- Controller node serves the image to target LED nodes over the local
-  Matter/Thread fabric.
-- Prototype images are signed and encrypted.
+- The operator loads a signed and encrypted OTA image into the controller node
+  over USB serial or controller-local Wi-Fi.
+- The controller node stores the image and acts as the Matter OTA Provider.
+- LED nodes enable Matter OTA Requestor and pull from the provider.
+- The controller node serves the image to target LED nodes over the local
+  Matter/Thread fabric, with no internet or venue Wi-Fi.
+- LED nodes verify the signature and decrypt before applying.
 - Invalid or wrong-key images are rejected.
 - Failed updates do not brick a node, and USB flashing remains the recovery
   path.
@@ -149,11 +211,18 @@ Status: planned.
 
 Goal: improve operation after the controller-node USB flow is stable.
 
+This phase formalizes additional operator surfaces (private Wi-Fi AP, phone app,
+etc.) as **operator ingress**, layered on top of the controller node. They never
+replace the Thread mesh and never move the Matter controller off the ESP32-C6
+controller node.
+
 Acceptance criteria:
 
 - USB serial remains the reliable recovery/control interface.
-- A deliberate next operator surface is selected: private WiFi AP, TUI bridge,
-  display/buttons, phone app, or another explicit interface.
+- A deliberate next operator surface is selected: private Wi-Fi AP, TUI bridge,
+  display/buttons, phone app, or another explicit interface — strictly as UI
+  ingress to the controller node, not as a new Matter controller.
 - The selected interface can list nodes, switch scenes/effects, provision
   segment config, identify nodes, and start OTA.
-- The selected interface does not remove the offline Thread mesh requirement.
+- The selected interface does not remove the offline Thread mesh requirement and
+  does not add a hard internet/cloud dependency.

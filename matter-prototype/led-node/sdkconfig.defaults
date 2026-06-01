@@ -35,7 +35,10 @@ CONFIG_LED_ORCHESTRA_SEGMENT_START=0
 CONFIG_LED_ORCHESTRA_SEGMENT_LENGTH=60
 CONFIG_LED_ORCHESTRA_TOTAL_LEDS=60
 
-# Keep the OTA requestor cluster available early, but leave encrypted image
-# plumbing for Phase 6 so this Phase 3 app does not require a PEM key blob.
+# LED node is the Matter OTA Requestor: it pulls signed/encrypted images from
+# the controller-node OTA Provider over the offline Thread fabric (Phase 6).
+# Keep the requestor cluster available early, but leave encrypted-image plumbing
+# for Phase 6 so this Phase 3 app does not require a PEM key blob. Matter fabric
+# credentials and firmware image signing/encryption are separate security layers.
 CONFIG_ENABLE_OTA_REQUESTOR=y
 CONFIG_ENABLE_ENCRYPTED_OTA=n

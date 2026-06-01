@@ -1,0 +1,12 @@
+# Template for controller operator Wi-Fi AP credentials.
+#
+# Setup:
+#   1. cp sdkconfig.defaults.local.example sdkconfig.defaults.local
+#   2. Set a unique SSID and a STRONG password (8-63 chars for WPA2-PSK).
+#   3. Delete the generated sdkconfig and rebuild so the values are applied:
+#        rm -f sdkconfig && idf.py build flash
+#
+# sdkconfig.defaults.local is gitignored and must never be committed.
+# This AP is operator ingress only; LED nodes are controlled over Thread/Matter.
+CONFIG_LED_ORCHESTRA_WIFI_AP_SSID="change-me-ssid"
+CONFIG_LED_ORCHESTRA_WIFI_AP_PASSWORD="change-me-to-a-strong-password"
