@@ -39,6 +39,23 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t)
 
 extern "C" void app_main()
 {
+    // The build sets the default runtime log level to WARN so the monitor stays
+    // readable. Re-raise the LED Orchestra tags so operator breadcrumbs (Wi-Fi
+    // ingress, commissioning events, console command results) remain visible.
+    esp_log_level_set("lo_controller", ESP_LOG_INFO);
+    esp_log_level_set("lo_wifi_ingress", ESP_LOG_INFO);
+    esp_log_level_set("lo_console", ESP_LOG_INFO);
+
+    // Keep the noisy wifi:/OPENTHREAD: drivers at WARN, but surface Matter
+    // commissioning progress so `pairing ble-thread` is debuggable: BLE link,
+    // PASE/CASE secure sessions, controller stages, and operational discovery.
+    // Lower these back toward WARN once commissioning is reliable.
+    esp_log_level_set("chip[CTL]", ESP_LOG_INFO);
+    esp_log_level_set("chip[DIS]", ESP_LOG_INFO);
+    esp_log_level_set("chip[SC]", ESP_LOG_INFO);
+    esp_log_level_set("chip[BLE]", ESP_LOG_INFO);
+    esp_log_level_set("chip[DL]", ESP_LOG_INFO);
+
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
