@@ -1,0 +1,33 @@
+---
+description: Keep controller console/terminal commands documented in docs/console.md
+globs: matter-prototype/**/led_orchestra_console.cpp,matter-prototype/**/led_orchestra_console.h,matter-prototype/**/app_main.cpp,matter-prototype/common/led_orchestra_matter.h,matter-prototype/cluster/led-orchestra.md
+alwaysApply: false
+---
+
+# Console Command Documentation
+
+Whenever you add, rename, remove, or change a controller-node console/terminal
+command, update the docs in the **same change**. Treat `docs/console.md` as the
+authoritative operator reference.
+
+This applies to:
+
+- A new/changed `esp_console_cmd_t` (e.g. the `lo-*` helpers in
+  `led_orchestra_console.cpp`) — its name, arguments, and behavior.
+- A new built-in command group registered in `app_main.cpp` (controller,
+  ot_cli, diagnostics, etc.).
+- New/changed cluster command ids, tags, or effect ids in
+  `common/led_orchestra_matter.h` and `cluster/led-orchestra.md`.
+
+When changing a command, also update, as needed:
+
+- `docs/console.md` — operator-facing command list, arguments, and flow.
+- `matter-prototype/cluster/led-orchestra.md` — the field/tag contract.
+- `matter-prototype/controller-node/README.md` — the implemented-slice list.
+
+## Example
+
+Adding `lo-list-nodes` to `led_orchestra_console.cpp` requires, in the same
+change, a new entry under "LED Orchestra Commands" in `docs/console.md` with its
+arguments and behavior, plus the README implemented-slice bullet. Do not leave
+the command undocumented.

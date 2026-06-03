@@ -4,19 +4,27 @@ This document captures the ESP32-C6-only offline mesh direction. The completed
 Rust WiFi/UDP Phase 1/2 implementation is archived on
 `archive/rust-phase-2`; `main` now carries the C++ ESP-IDF/ESP-Matter path.
 
-The first prototype keeps LED control fully local: operator UI -> ESP32-C6
-controller node -> Thread/Matter mesh -> ESP32-C6 LED nodes. USB serial is the
-first operator ingress, and controller-local Wi-Fi is allowed for laptop/mobile
-convenience. There is no venue Wi-Fi, Ethernet, cloud, or internet requirement.
-See `docs/architecture.md` for the role glossary and topology diagram; the role
-definitions there (UI/operator ingress vs. Matter controller vs. Thread Border
-Router vs. OTA Provider vs. OTA Requestor) apply throughout this document.
+LED control stays fully local: control plane / operator UI -> ESP32-C6 hub ->
+Thread/Matter mesh -> ESP32-C6 LED nodes. USB serial is the baseline operator
+ingress, controller-local Wi-Fi is allowed for laptop/mobile convenience, and a
+Kubernetes control plane pushes program bundles to the hub over IP. There is no
+venue Wi-Fi, Ethernet, cloud, or internet requirement to render scenes. See
+[`architecture.md`](architecture.md) for the role glossary and topology diagram;
+those role definitions (control plane vs. UI/operator ingress vs. Matter
+controller vs. Thread Border Router vs. RCP vs. OTA Provider/Requestor) apply
+throughout this document.
+
+The production controller/border-router topology is a validation-gated decision
+(Option 2 Hub C6 + RCP, with all-C6 Option 3 and Pi Option 4 fallbacks). The
+canonical statement and the experiment that selects it are in
+[`controller-topology-adr.md`](controller-topology-adr.md) and
+[`controller-topology-validation.md`](controller-topology-validation.md).
 
 Current state: ESP-IDF apps exist under `matter-prototype/` for both the LED
-node and the controller node. Both build for ESP32-C6. One LED node has been
-flashed; the controller node has been flashed with USB serial plus private Wi-Fi
-AP operator ingress and booted to the controller shell. Commissioning and
-end-to-end hardware validation remain.
+node and the controller node; both build for ESP32-C6. The controller boots and
+runs its operator AP; BLE commissioning completes PASE + `AddNOC`. Hardware
+bring-up established that a single infra-less C6 cannot self-resolve operational
+nodes, so the next work is the border-router topology validation (Phase 4).
 
 ## Decision
 
@@ -42,7 +50,7 @@ stack are C++-native.
 
 - USB serial plus controller-local Wi-Fi private AP by default for laptop/mobile
   convenience.
-- Sends operator intent and, in Phase 6, OTA image bytes to the controller node.
+- Sends operator intent and, in the OTA phase, OTA image bytes to the hub.
 - Holds **no** Matter fabric credentials and is **not** the Matter controller.
   It can be unplugged once the controller node holds the desired state.
 
@@ -57,20 +65,26 @@ stack are C++-native.
 - Acts as a **Matter OTA Requestor** in the OTA phase (downloads, verifies,
   decrypts, and applies images from the controller-node provider).
 
-### Controller Node
+### Controller Node (evolves into the Hub)
 
-- ESP32-C6 Matter controller/commissioner in the same private fabric — the local
-  source of truth for scenes, commissioned node inventory, groups, and (later)
-  OTA images.
+The controller node is the Matter controller/commissioner in the private fabric
+and the local source of truth for scenes, node inventory, groups, and (later)
+OTA images. Hardware bring-up established it needs a real OpenThread Border
+Router, so under the locked decision it evolves into the **Hub C6** (Option 2):
+Matter controller + esp-thread-br host (with an RCP C6 for the radio) + a thin
+Kubernetes bundle gateway. See
+[`controller-topology-adr.md`](controller-topology-adr.md).
+
 - Receives operator intent and OTA image bytes over USB serial or the controller
-  private AP, then translates them into Matter actions on the fabric.
-- Sends unicast commands for per-node provisioning.
-- Sends Matter group/multicast commands for "all nodes" scene changes.
+  private AP, and validated program bundles from Kubernetes over IP, then
+  translates them into Matter actions on the fabric.
+- Caches already-approved bundles and relays them; heavy authoring/validation/
+  scheduling stays in Kubernetes — the hub stays thin.
+- Sends unicast commands for per-node provisioning and bundle distribution.
+- Sends Matter group/multicast commands for "all nodes" scene/bundle activation.
 - Acts as the local **Matter OTA Provider** for offline installs.
-- Runs without venue Wi-Fi or internet. Whether it can be a Thread-only embedded
-  controller or needs an explicit OpenThread Border Router role for the
-  controller path is the key open hardware risk (see below). Controller-local
-  Wi-Fi is only operator ingress; LED nodes remain controlled through Thread.
+- Runs without venue Wi-Fi or internet for LED control. Wi-Fi/IP carries only
+  Kubernetes ingress and telemetry; LED nodes are controlled over Thread.
 
 ## Custom Cluster Contract
 
@@ -102,8 +116,13 @@ Compatibility rules:
 - Add new effect ids only at the end.
 - Keep the controller responsible for resolving scene priority before sending
   commands to LED nodes.
-- Deliver new compiled LED modes through firmware OTA in Phase 6. Runtime
-  effect plugins or scripts are a separate future design.
+- Deliver new compiled LED modes through firmware OTA. Runtime effect plugins or
+  scripts are a separate future design.
+- Program bundles (playlists/schedules authored in Kubernetes) are **declarative
+  data** over the stable effect-id registry, not code. Distribute per-node
+  (unicast), activate by group at a scheduled time, and carry a bundle id/version
+  reported back as a status attribute. Keep bundles small; use a BDX-style
+  chunked transfer if a payload outgrows the cluster.
 - Treat effect CRUD conservatively: list effects and update parameters at
   runtime; add or change effect code through OTA; hide/deprecate old effects
   instead of reusing their ids.
@@ -116,17 +135,23 @@ Prototype implementation notes:
 - FastLED should be evaluated as a C++ component before replacing `led_strip`.
   Its ESP-IDF CMake path currently expects Arduino-ESP32 integration, so this
   needs explicit build and hardware validation with ESP-Matter on ESP32-C6.
-- `SetNodeConfig` is RAM-only in Phase 3. Durable NVS storage is planned for
-  Phase 5.
+- `SetNodeConfig` is RAM-only in the prototype. Durable NVS storage is planned
+  for a later phase.
 - The controller node registers USB shell helpers: `lo-set-scene`,
   `lo-set-node-config`, and `lo-sync-clock`.
-- The controller-node config currently enables private AP ingress and disables
-  WiFi station mode by default. **Open hardware risk:** first hardware
-  validation must confirm whether ESP-Matter supports a Thread-side embedded
-  controller on ESP32-C6, or whether the controller path needs an explicit
-  OpenThread Border Router role. Separately, station mode can be enabled as a
+- **Border-router decision (resolved 2026-06-02).** A single native-Thread
+  ESP32-C6 cannot be a self-contained Matter commissioner: BLE commissioning and
+  SRP registration succeed, but operational discovery times out (`dns browse` →
+  `Error 28: ResponseTimeout`) because an infra-less SoC has no mDNS/advertising
+  proxy to answer its own DNS-SD probes. The `CONFIG_ENABLE_ROUTE_HOOK=y`
+  experiment was tried and ruled out. The controller path therefore requires a
+  real OpenThread Border Router; how much of the controller co-locates with it is
+  the validation-gated Option 2/3/4 choice. See
+  [`controller-topology-adr.md`](controller-topology-adr.md),
+  [`controller-topology-validation.md`](controller-topology-validation.md), and
+  [`debugging-journal.md`](debugging-journal.md). Station mode remains a
   deliberate build-time option for a private/local network without making LED
-  nodes Wi-Fi devices or introducing an internet requirement.
+  nodes Wi-Fi devices or adding an internet requirement.
 
 ## Security And Manufacturing
 
@@ -148,22 +173,21 @@ Before any field/production use:
 
 ## OTA Direction
 
-Prototype OTA target (Phase 6), fully offline:
+Prototype OTA target (the OTA phase), fully offline:
 
 ```text
-operator (laptop/mobile)
-  -> USB serial or controller-local Wi-Fi: signed + encrypted firmware image
-  -> controller node: stores image, acts as Matter OTA Provider
+operator (USB / controller-local Wi-Fi) or Kubernetes
+  -> signed + encrypted firmware image
+  -> hub: stores image, acts as Matter OTA Provider
   -> Matter OTA over Thread
   -> LED nodes: Matter OTA Requestors verify + decrypt + apply
 ```
 
-- The operator loads a signed and encrypted firmware image over USB serial or
-  controller-local Wi-Fi. The laptop/phone is only ingress and never joins the
-  Matter fabric.
-- The controller node stores that image and serves it to commissioned LED nodes
-  as the local **Matter OTA Provider** over the offline Matter/Thread fabric. No
-  image is fetched from the internet.
+- The image is loaded over USB serial, controller-local Wi-Fi, or the Kubernetes
+  link. The ingress source is only ingress and never joins the Matter fabric.
+- The hub stores that image and serves it to commissioned LED nodes as the local
+  **Matter OTA Provider** over the offline Matter/Thread fabric. No image is
+  fetched from the internet.
 - LED nodes act as **Matter OTA Requestors**: download, verify signature,
   decrypt, and apply, keeping USB flashing as the recovery path.
 - Reject invalid or wrong-key images and verify rollback/recovery.

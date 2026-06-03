@@ -2,12 +2,17 @@
 
 The controller node is an ESP32-C6 Matter controller/commissioner for the
 private LED Orchestra fabric, and the local source of truth for scenes, node
-inventory, and groups. It receives operator intent over USB serial first, and
-over controller-local Wi-Fi for laptop/mobile convenience. Laptop/mobile
-clients are ingress only, not the Matter controller. The controller node is the
-local Matter OTA Provider in Phase 6. LED nodes remain operated and controlled
-through Thread by this controller node; no venue Wi-Fi, cloud, or internet is
-required.
+inventory, and groups. Hardware bring-up established it needs a real OpenThread
+Border Router, so under the locked decision it evolves into the **Hub** (Matter
+controller + esp-thread-br host, with an **RCP C6** radio) plus a thin Kubernetes
+bundle gateway — the validation-gated Option 2. See
+[`../../docs/controller-topology-adr.md`](../../docs/controller-topology-adr.md).
+
+It receives operator intent over USB serial and controller-local Wi-Fi, and
+validated program bundles from Kubernetes over IP. Those clients are ingress
+only, not the Matter controller. The hub is the local Matter OTA Provider. LED
+nodes remain controlled over Thread; no venue Wi-Fi, cloud, or internet is
+required to render scenes.
 
 ## Acceptance Criteria
 
@@ -33,6 +38,16 @@ required.
   - `lo-set-node-config <node-id> <endpoint-id> <orchestra-node-id> <segment-start> <segment-len> <total-leds> <led-gpio>`
   - `lo-sync-clock <node-id|group-id> <endpoint-id> [controller-time-ms]`
 
+For opening the monitor, log verbosity, the built-in command groups, and the
+full terminal command reference, see [`docs/console.md`](../../docs/console.md).
+Per the `.cursor/rules/console-commands.mdc` rule, update `docs/console.md`
+whenever a console command changes.
+
+Thread bring-up note: `matter esp ot_cli dataset init new`, `dataset commit active`,
+`ifconfig up`, and `thread start` are documented with a startup diagram and
+"first boot vs reboot" guidance in
+[`docs/console.md#what-the-ot_cli-bring-up-commands-do`](../../docs/console.md#what-the-ot_cli-bring-up-commands-do).
+
 Confirmed on hardware:
 
 - Boots to `LED Orchestra controller node ready`; USB serial/JTAG shell is live.
@@ -49,9 +64,13 @@ manager takes over the radio, forces STA, and stops the operator AP
 (`WIFI_EVENT_AP_STOP`). The operator AP is a standalone `esp_wifi` softAP in
 `controller_wifi_ingress.cpp`, independent of Matter (which runs over Thread).
 
-Known open issue: with CHIP Wi-Fi off and no Thread SRP server / border router
-present, Matter DNS-SD advertising over IP errors at boot (`chip[DIS]: Failed to
-advertise ... : 3`). This ties into the Thread-controller open risk below.
+Resolved finding: with CHIP Wi-Fi off and no border router present, Matter
+operational discovery times out — an infra-less single C6 cannot self-resolve
+its DNS-SD records. The controller path therefore requires a real OpenThread
+Border Router; the next work is selecting Option 2/3/4 via the topology
+validation. See
+[`../../docs/controller-topology-adr.md`](../../docs/controller-topology-adr.md)
+and [`../../docs/debugging-journal.md`](../../docs/debugging-journal.md).
 
 Keep USB serial as the required recovery/baseline operator ingress. A private
 Wi-Fi AP, TUI bridge, phone app, or physical controls are additional operator
@@ -63,7 +82,37 @@ devices and do not move Matter control off the controller node.
 The `sdkconfig.defaults` file records the intended private-fabric controller
 direction. It currently uses Thread, enables controller-local private AP ingress
 by default, and disables WiFi station mode unless deliberately selected through
-Kconfig. **Open hardware risk:** the first hardware test must confirm whether
-ESP-Matter supports a Thread-side embedded controller on ESP32-C6, or whether the
-controller path needs an explicit OpenThread Border Router role. Operator Wi-Fi
-does not add venue Wi-Fi, internet, or LED-node Wi-Fi control.
+Kconfig. Under the locked decision this app grows the esp-thread-br host role (or
+joins a separate BR's mesh in Option 3); see
+[`../../docs/controller-topology-adr.md`](../../docs/controller-topology-adr.md).
+Operator Wi-Fi does not add venue Wi-Fi, internet, or LED-node Wi-Fi control.
+
+## Local Operator AP Credentials
+
+Do not put the controller AP SSID or password in committed docs or defaults.
+They belong in the gitignored local defaults file:
+
+```text
+matter-prototype/controller-node/sdkconfig.defaults.local
+```
+
+Create it from the committed template if it does not exist:
+
+```bash
+cp sdkconfig.defaults.local.example sdkconfig.defaults.local
+```
+
+Then set:
+
+```text
+CONFIG_LED_ORCHESTRA_WIFI_AP_SSID="..."
+CONFIG_LED_ORCHESTRA_WIFI_AP_PASSWORD="..."
+```
+
+After changing `sdkconfig.defaults.local`, remove the generated `sdkconfig` and
+rebuild/flash so ESP-IDF regenerates the effective config:
+
+```bash
+rm -f sdkconfig sdkconfig.old
+idf.py -p /dev/cu.usbmodem1101 build flash
+```

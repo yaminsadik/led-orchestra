@@ -40,7 +40,7 @@ Behavior:
 
 - Reject unknown `effect_id` values.
 - Store the accepted `sequence` in `last_sequence`. Stale-sequence rejection is
-  a Phase 5 refinement.
+  a later refinement.
 - Apply immediately when `scheduled_start_time_ms` is `0`.
 - Otherwise apply at the synchronized local time matching the scheduled start.
 
@@ -58,8 +58,8 @@ Fields:
 
 Behavior:
 
-- Phase 3 stores config in RAM and reports it through attributes.
-- Phase 5 persists config in the node's nonvolatile storage.
+- The prototype stores config in RAM and reports it through attributes.
+- A later phase persists config in the node's nonvolatile storage.
 - Log the loaded config at boot.
 - Use unicast, not group command, for provisioning.
 
@@ -102,3 +102,24 @@ lo-sync-clock <node-id|group-id> <endpoint-id> [controller-time-ms]
 
 Use Matter group/multicast for `SetScene` once at least two LED nodes are
 commissioned. Keep `SetNodeConfig` unicast-only.
+
+## Program Bundles (Direction)
+
+Kubernetes authors **program bundles** — declarative playlists of `(effect_id,
+params, timing)` plus schedules — over the stable effect-id registry above.
+Bundles are data, not code; new effect behavior still ships as compiled firmware
+via OTA. This extends, and does not replace, the command contract:
+
+- **Distribute then activate.** Push a bundle per node with a unicast transfer
+  (BDX-style chunking if it outgrows a single command), then activate
+  "bundle vX at time T" with a group command so all segments switch together.
+- **Version + reconcile.** Carry a `bundle_id` and `bundle_version`; a node
+  reports its last-accepted version as a status attribute so the hub can
+  reconcile a node that missed an update. A malformed bundle is rejected and the
+  node keeps its last valid program.
+- **Autonomous playback.** A node holding a scheduled bundle plus a `SyncClock`
+  offset keeps running the timeline through a hub/OTBR outage and re-syncs on
+  reconnect.
+
+Exact bundle schema, size limits, transfer mechanism, and signing are open; see
+[`../../docs/architecture.md#program-distribution`](../../docs/architecture.md#program-distribution).

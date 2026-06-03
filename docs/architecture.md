@@ -1,100 +1,134 @@
 # Architecture
 
-LED Orchestra is a distributed, fully offline LED renderer. Each ESP32-C6 LED
-node owns one physical strip segment. A dedicated ESP32-C6 controller node owns
-the show state, acts as the Matter controller/commissioner, and sends commands
-to the LED nodes over an offline Thread mesh.
+LED Orchestra is a distributed LED renderer. Each ESP32-C6 LED node owns one
+physical strip segment; together the segments form one virtual strip. The LED
+nodes are Matter-over-Thread devices driven by a controller over an offline
+Thread mesh.
 
-The first prototype needs no venue Wi-Fi, no cloud, and no internet. Operator
-ingress is USB serial plus the controller's private Wi-Fi AP for laptop/mobile
-convenience. In both cases, the laptop/phone is only operator input; it is not
-the Matter controller. See
+The LED control path is fully offline: no venue Wi-Fi, no cloud, and no internet
+are required to render scenes. A Kubernetes control plane authors and schedules
+shows and pushes them to the controller over an IP link, but the live show keeps
+running without it. The word "controller" is easy to overload, so see
 [Roles And Responsibilities](#roles-and-responsibilities) for the precise split
-between the operator UI, the Matter controller, the Thread Border Router, and
-the OTA roles, because the word "controller" is otherwise easy to overload.
+between the control plane, the Matter controller, the Thread Border Router, the
+RCP radio, and the LED nodes.
+
+The production controller/border-router topology is a **validation-gated**
+decision; the canonical statement lives in
+[`controller-topology-adr.md`](controller-topology-adr.md) and the experiment
+that decides it in
+[`controller-topology-validation.md`](controller-topology-validation.md). This
+file describes the system those documents converge on.
 
 ## Project Layout
 
 | Path | Role |
 | --- | --- |
-| `matter-prototype/` | ESP-IDF/ESP-Matter prototype lane for Thread LED nodes, a dedicated controller node, custom cluster, and offline OTA. |
-| `matter-prototype/led-node/` | C++ LED-node app that exposes the LED Orchestra custom cluster and renders one physical strip segment. |
-| `matter-prototype/controller-node/` | C++ controller/commissioner app with USB serial ingress and controller-local Wi-Fi ingress. |
+| `matter-prototype/` | ESP-IDF/ESP-Matter lane for Thread LED nodes, the controller, the custom cluster, and offline OTA. |
+| `matter-prototype/led-node/` | C++ LED-node app: exposes the LED Orchestra custom cluster and renders one strip segment. |
+| `matter-prototype/controller-node/` | C++ controller/commissioner app; evolves into the Hub (controller + esp-thread-br host) under Option 2. |
 | `matter-prototype/common/` | Shared C++ constants for the custom cluster and effect ids. |
+| `matter-prototype/cluster/` | Human-readable custom-cluster contract. |
 
-The completed Rust WiFi/UDP Phase 1/2 implementation is archived on the
-`archive/rust-phase-2` branch. `main` should stay focused on the C++
-ESP-IDF/ESP-Matter path.
+The completed Rust Wi-Fi/UDP Phase 1/2 implementation is archived on the
+`archive/rust-phase-2` branch. `main` carries only the C++ ESP-IDF/ESP-Matter
+path; there is no `firmware/` (Rust) tree on `main`.
 
 ## Roles And Responsibilities
 
-These are five distinct concepts. The prototype deliberately collapses most of
-them onto the ESP32-C6 controller node, but they are *not* the same thing and
-should not be conflated in code or docs.
+These are distinct concepts. Earlier prototypes collapsed several of them onto
+one ESP32-C6, which is exactly what failed (see
+[`debugging-journal.md`](debugging-journal.md)). They must not be conflated in
+code or docs.
 
-| Role | What it is | Where it lives in the offline prototype |
+| Role | What it is | Where it lives |
 | --- | --- | --- |
-| **UI / operator ingress** | The surface a human uses to express intent (set a scene, provision a node, load an OTA image). It carries operator commands; it holds no Matter identity. | USB serial and controller-local Wi-Fi. The controller currently defaults to a private operator AP whose SSID/password are set in the gitignored `sdkconfig.defaults.local`. It is **not** the Matter controller. |
-| **Matter controller / commissioner** | The Matter fabric admin: it commissions LED nodes, holds fabric credentials, sends cluster commands, and is the local source of truth for scenes, node inventory, groups, and OTA images. | The dedicated **ESP32-C6 controller node**. |
-| **Thread Border Router (TBR)** | A device that routes between a Thread mesh and another IP network (Wi-Fi/Ethernet). | **Not required** for the offline prototype. See the open risk below. |
-| **Matter OTA Provider** | The node that stores a firmware image and serves it to requestors over the Matter fabric. | The **controller node** (Phase 6). The image arrives over USB from the operator first. |
-| **Matter OTA Requestor** | A node that asks the provider for, downloads, and applies a firmware image. | Each **LED node** (Phase 6). |
+| **Control plane (Kubernetes)** | Authors program bundles, playlists, and schedules; validates and stores the master library; the heavy logic. Talks **only** to the controller/hub over IP. | Off-board: a Kubernetes cluster / operator app. Never on a C6, never on the Thread mesh. |
+| **UI / operator ingress** | The surface a human/automation uses to express intent. Carries commands and bundle bytes; holds no Matter identity. | USB serial, the controller's private Wi-Fi AP, and the Kubernetes link. **Not** the Matter controller. |
+| **Matter controller / commissioner** | The fabric admin: commissions LED nodes, holds fabric credentials, sends cluster commands, resolves scene/group/priority, caches approved bundles, relays them over Matter. | The **Hub C6** (Option 2). The control plane does the heavy lifting; the hub stays a thin device gateway. |
+| **Thread Border Router (OTBR)** | Owns the Thread network and DNS-SD/SRP; routes IPv6 between the IP side and the mesh. **Required** — a single infra-less C6 cannot self-resolve operational nodes. | `esp-thread-br` **host + RCP**, co-located with the Matter controller on the Hub C6 (Option 2). See the topology ladder below. |
+| **RCP (radio co-processor)** | A dedicated 802.15.4 radio driven by the border-router host over UART/SPI. | A dedicated **RCP C6**. |
+| **Matter OTA Provider** | Stores a firmware image and serves it over the fabric. | The **Hub C6** (the OTA phase). The image arrives over USB or the Kubernetes link first. |
+| **Matter OTA Requestor** | Asks the provider for, verifies, and applies a firmware image. | Each **LED node** (the OTA phase). |
+| **LED node** | A Thread-only Matter device that renders one strip segment and can store program bundles for autonomous scheduled playback. | Each **LED node C6**. |
 
 Key clarifications:
 
-- The laptop/phone is only operator input. It does **not** need to be a Matter
-  controller, run a Matter app, or hold fabric credentials. It reaches the
-  controller node over USB serial or the controller's private Wi-Fi AP; the
-  controller node translates intent into Matter cluster commands.
-- The ESP32-C6 controller node is the Matter controller/commissioner and the
-  local source of truth. It works with no venue network or internet.
-- A Thread Border Router is only needed if (a) the Matter controller is moved
-  onto a separate IP/Wi-Fi/Ethernet network instead of being embedded on the
-  ESP32-C6, or (b) hardware validation shows ESP-Matter cannot run a Thread-only
-  embedded controller on ESP32-C6 and requires an explicit OpenThread
-  border-router role for the controller path. This is an open risk
-  ([see below](#open-design-choices)), not a current requirement.
-- Matter fabric credentials and firmware-image signing/encryption are
-  **separate security layers**. Fabric credentials authorize who may talk on the
-  Matter fabric; image signing/encryption authorizes what firmware a node will
-  accept. Neither replaces the other.
+- **The control plane talks only to the controller/hub.** Kubernetes never
+  reaches an LED node directly. LED nodes stay Thread-only and never join Wi-Fi.
+- **A real border router is required, not optional.** This was an open risk; it
+  is now closed by hardware evidence (see
+  [Controller / Border-Router Topology](#controller--border-router-topology) and
+  [`debugging-journal.md`](debugging-journal.md)).
+- **LED control never rides Wi-Fi.** Wi-Fi/IP carries only Kubernetes ingress and
+  telemetry. Controller→LED commands always travel Matter-over-Thread.
+- **Fabric credentials and image signing are separate security layers.** Fabric
+  credentials authorize who may talk on the Matter fabric; image (and bundle)
+  signing authorizes what a node will accept. Neither replaces the other.
 
-### Offline Prototype Topology
+## Controller / Border-Router Topology
+
+The 2026-06-02 bring-up proved a single ESP32-C6 acting as Matter commissioner
+**and** its own infra-less SRP/DNS-SD owner cannot resolve its own operational
+nodes (`dns browse` → `Error 28: ResponseTimeout`). The fix is a real OpenThread
+Border Router. How much of the controller co-locates with that border router is a
+**validation-gated** decision with an all-C6-first fallback ladder:
+
+| Option | Topology | Role |
+| --- | --- | --- |
+| **2** | Hub C6 (Matter controller + esp-thread-br host + thin K8s gateway) + RCP C6 | Preferred production target **if** the Hub validates within measured headroom. |
+| **3** | Controller C6 + BR-host C6 + RCP C6 (all-C6) | Fallback if the Hub is resource-constrained but the C6 BR path is sound. The controller C6 joins the BR-owned mesh over its **own 802.15.4 radio** — never controller↔BR over Wi-Fi. |
+| **4** | Pi/Linux `ot-br-posix` + RCP/dongle | Final fallback only if the C6 BR path itself is not stable. |
+
+The **locked production ladder is 2 → 3 → 4**; each rung is taken only if the one
+above fails its gate. (Option 1 — a single C6 doing everything — was explored
+first and ruled out / demoted to an optional drop-the-RCP optimization; see
+[`controller-topology-adr.md`](controller-topology-adr.md).)
+
+The gate is quantitative (heap, fragmentation, soak uptime, reboot recovery,
+discovery success at 20-node scale, flash headroom). The decisive first step
+proves a **separate** Thread client resolves an LED node through the BR — not the
+BR resolving its own record. Full rationale and the experiment:
+[`controller-topology-adr.md`](controller-topology-adr.md),
+[`controller-topology-validation.md`](controller-topology-validation.md).
+
+## System Topology
+
+For the **Thread mesh** view — 802.15.4 links, OTBR split, protocol stack, and
+join/control sequence — see [`mesh-network.md`](mesh-network.md).
 
 ```mermaid
-flowchart LR
-    laptop["USB operator / laptop<br/>UI / operator ingress only"]
-    mobile["Laptop/mobile over<br/>controller private AP<br/>UI / operator ingress only"]
-
-    subgraph controller["ESP32-C6 controller node"]
-        ctrl["Matter controller / commissioner"]
-        state["Local scene state<br/>node inventory · groups"]
-        prov["Future: Matter OTA Provider<br/>(stores operator-loaded image)"]
+flowchart TB
+    subgraph cp["Control plane — off-board, off-mesh"]
+        k8s["Kubernetes / operator app<br/>authors + validates + schedules<br/>program bundles, playlists, schedules"]
     end
 
-    subgraph mesh["Thread mesh for LED control (802.15.4, no internet)"]
-        led1["ESP32-C6 LED node<br/>Matter-over-Thread device<br/>LED renderer<br/>Future: OTA Requestor"]
-        led2["ESP32-C6 LED node<br/>Matter-over-Thread device<br/>LED renderer<br/>Future: OTA Requestor"]
+    subgraph site["Installation — all-C6 (Option 2)"]
+        subgraph hub["Hub C6"]
+            ctrl["Matter controller / commissioner"]
+            br["esp-thread-br host<br/>Thread Leader · SRP · DNS-SD"]
+            gw["thin bundle gateway<br/>cache approved bundles, relay"]
+        end
+        rcp["RCP C6<br/>802.15.4 radio"]
+
+        subgraph mesh["Thread mesh — offline (no internet)"]
+            led1["LED node C6<br/>renderer + bundle store"]
+            led2["LED node C6<br/>renderer + bundle store"]
+        end
     end
 
-    laptop -- "USB serial commands<br/>+ OTA image bytes" --> controller
-    mobile -- "Wi-Fi operator commands<br/>+ OTA image bytes" --> controller
-    controller -- "Matter custom cluster<br/>over Thread" --> mesh
-    ctrl --- state
-    ctrl --- prov
+    laptop["USB / private Wi-Fi AP<br/>operator ingress only"]
 
-    %% Optional future architecture only — NOT a Phase 3 requirement
-    tbr["Optional future:<br/>Thread Border Router"]:::optional
-    extctrl["Optional future:<br/>off-device Matter controller<br/>on Wi-Fi / Ethernet"]:::optional
-    extctrl -.-> tbr -.-> mesh
-
-    classDef optional stroke-dasharray: 5 5,color:#888,stroke:#888;
+    k8s -- "Wi-Fi / IP (MQTT)<br/>bundles + live control; telemetry up" --> gw
+    laptop -- "USB serial / Wi-Fi" --> hub
+    hub -- "UART / SPI" --> rcp
+    rcp -- "Matter-over-Thread" --> mesh
+    ctrl --- br --- gw
 ```
 
-Everything inside the solid boxes keeps the controller node as the only Matter
-controller for LED nodes. Wi-Fi, when enabled, is only an operator ingress path
-to the controller node; LED nodes remain controlled over Thread/Matter. The
-dashed nodes are optional future architecture and are not added to Phase 3.
+Everything that touches LED rendering stays on Matter-over-Thread. Wi-Fi/IP only
+connects the control plane and operator ingress to the hub. Options 3 and 4 move
+boxes around (see the ladder above) but keep this same control path on Thread.
 
 ## Runtime Model
 
@@ -107,151 +141,197 @@ node 2 segment:              [60, 120)
 node 3 segment:                         [120, 180)
 ```
 
-Each node renders only its own contiguous segment. Effects still receive the
-global LED index, so a rainbow or wave can flow across board boundaries.
+Each node renders only its own contiguous segment. Effects receive the global LED
+index, so a rainbow or wave flows across board boundaries.
+
+## Program Distribution
+
+Kubernetes authors and validates **program bundles** — declarative playlists of
+`(effect_id, params, timing)` plus schedules — over the stable, append-only
+compiled effect-id registry. Bundles are **data, not code**: new effect behavior
+still ships as compiled firmware via Matter OTA (the OTA phase). Runtime-uploaded
+effect scripts/plugins remain a separate future design.
+
+```text
+Program / playlist / schedule updates:
+Kubernetes -> Wi-Fi/IP -> Hub C6 (validate-once, cache) -> Matter/Thread -> LED nodes (store + render)
+
+Live scene control:
+Operator / Kubernetes -> Wi-Fi/IP or USB -> Hub C6 -> Matter/Thread -> LED nodes
+
+Firmware updates:
+Matter OTA over Thread (Hub C6 = provider); USB flash = recovery
+```
+
+Distribution discipline:
+
+- **Distribute then activate.** Push a bundle per-node (unicast, reliable), then
+  activate "program vX at time T" with a Matter groupcast so all segments flip
+  together. This matches the existing unicast-config / group-scene split.
+- **Version and reconcile.** A node reports its last-accepted bundle version as a
+  status attribute; the hub reconciles a node that missed an update. A node
+  rejecting a malformed bundle keeps its last valid program.
+- **Keep bundles small.** Thread is low-bandwidth (~1280-byte IPv6 MTU, 6LoWPAN
+  fragmentation). Keep bundles declarative; if a payload grows, use a BDX-style
+  chunked transfer (as Matter OTA does) rather than oversized cluster payloads.
+- **Autonomous playback is the resilience win.** A node holding a scheduled
+  bundle plus a synced clock keeps running the timeline through a controller or
+  OTBR outage. This is what keeps the live show offline-tolerant.
 
 ## Command Flow
 
 ```text
-operator UI (USB or controller-local Wi-Fi) -> controller node (Matter controller) -> Matter custom cluster over Thread -> LED nodes -> LEDs
+control plane / operator UI -> Hub C6 (Matter controller) -> Matter custom cluster over Thread -> LED nodes -> LEDs
 ```
 
-Two splits matter here:
+Three splits matter:
 
-- **UI ingress vs. controller.** The laptop/mobile is only the operator UI. It
-  hands intent to the controller node over USB serial or controller-local Wi-Fi.
-  The controller node is the Matter controller that decides what should happen
-  and emits cluster commands.
-- **Controller vs. nodes.** The controller node decides the scene; LED nodes
-  render it and keep rendering the last valid scene locally if Thread contact
-  drops.
+- **Control plane vs. controller.** Kubernetes (and the laptop/mobile) hand
+  intent and validated bundles to the hub over IP/USB. The hub is the Matter
+  controller that emits cluster commands. The heavy logic lives in Kubernetes;
+  the hub stays thin.
+- **Controller vs. nodes.** The hub resolves the scene; LED nodes render it and
+  keep rendering the last valid scene/bundle locally if Thread contact drops.
+- **Ingress vs. transport.** Wi-Fi/IP and USB are ingress to the hub only;
+  Matter-over-Thread is the only LED-node transport.
 
-No part of LED-node control requires venue Wi-Fi, Ethernet, a cloud service, or
-the internet. Controller-local Wi-Fi is a convenience ingress to the controller
-node only; it is not LED-node transport.
+## Decision: LED Nodes Stay Thread-Only
+
+LED nodes are intentionally not Wi-Fi/API devices. They are reachable only
+through the Matter/Thread fabric; the control plane and operators talk to the hub
+first.
+
+```text
+Kubernetes / operator app / laptop
+  -> Wi-Fi/IP or USB ingress
+  -> Hub C6
+  -> Matter over Thread
+  -> LED nodes
+```
+
+This is a product decision, not a radio limitation. ESP32-C6 has Wi-Fi, but
+putting Wi-Fi on every LED node would make each segment responsible for
+credentials, reconnect behavior, API security, upload paths, and venue-network
+edge cases. Thread keeps LED nodes focused on what must be reliable: hold their
+Matter identity, receive commands, store accepted bundles, and render.
+
+Reasons for the decision:
+
+- **Lower node complexity:** no HTTP/MQTT servers, K8s-facing auth, Wi-Fi
+  credential handling, or Wi-Fi recovery logic on the nodes.
+- **Cleaner security boundary:** the control plane and operators talk to one
+  trusted hub instead of exposing every LED node to the IP network. The hub is
+  the one node that needs IP-facing hardening (mTLS/token auth, signed bundles).
+- **Synchronized control:** the hub stays the conductor that resolves scenes,
+  priorities, groups, schedules, and timing before nodes render.
+- **Better fleet behavior:** many nodes on venue Wi-Fi would add congestion and
+  reconnect variability versus a dedicated Thread mesh.
+- **Consistent distribution:** the hub validates/caches a bundle once, then
+  distributes the accepted version consistently.
+- **Matter-over-Thread fit:** commissioning, secure commands, discovery, and
+  group control already fit the LED-node role.
+
+"Direct access" to an LED node means reaching it through the border router and
+Matter fabric — not exposing it as a separate Wi-Fi device with its own API.
 
 ## Transport Strategy
 
 - Matter is the application/security/controller model.
-- Thread/OpenThread is the offline IPv6 mesh carried by the ESP32-C6 802.15.4
-  radio.
-- ESP-Matter is ESP-IDF/C++ oriented, so Phase 3 onward is implemented in C++.
-- FastLED is the intended rendering/effect library after an ESP32-C6 +
-  ESP-Matter integration spike proves the build/runtime path.
-- The first Matter fabric is private development only, with generated
-  per-device factory data and test/dev credentials.
+- Thread/OpenThread is the offline IPv6 mesh on the ESP32-C6 802.15.4 radio,
+  with DNS-SD/SRP owned by the border router.
+- The Kubernetes↔hub link should be **MQTT** (lightweight, the hub is a client
+  with no inbound port exposed, reconnect-friendly, and gives a natural
+  telemetry-up path). Avoid a gRPC server on the C6. Define the bundle payload as
+  a versioned schema (CBOR/protobuf) independent of transport.
+- ESP-Matter is ESP-IDF/C++ oriented, so the firmware path is C++.
+- FastLED is the intended renderer after an ESP32-C6 + ESP-Matter integration
+  spike; ESP-IDF `led_strip` is the working fallback. FastLED runs only on the
+  LED nodes — it is unaffected by the controller/hub topology.
+- The first Matter fabric is private development only, with generated per-device
+  factory data and test/dev credentials.
 
 ## Rendering Invariants
 
 - Effects are pure functions of `(global_index, time_ms, params, context)`.
 - Nodes do not need per-effect mutable state to stay visually aligned.
-- Every production LED node is ESP32-C6.
-- Effect ids are append-only and remain stable across Matter commands and OTA
-  updates.
+- Every production board is ESP32-C6 (the hub may use a larger-flash C6).
+- Effect ids are append-only and stable across Matter commands and OTA updates.
 - The controller resolves priority before nodes render.
-- Firmware keeps the last valid scene if a bad command arrives or network
+- Firmware keeps the last valid scene/bundle if a bad command arrives or network
   contact is lost.
 
 ## Override Priority
-
-The planned priority chain is:
 
 ```text
 emergency > segment > group > global
 ```
 
-Phase 5 should resolve this chain in the controller, then send a plain
-`ActiveScene`-equivalent command to each affected node. That keeps firmware
-small and predictable.
+The controller resolves this chain, then sends a plain `ActiveScene`-equivalent
+command to each affected node, keeping firmware small.
 
 ## Matter Custom Cluster
 
-The Matter/Thread prototype uses a vendor custom cluster instead of trying to
-fit LED Orchestra behavior into standard light clusters.
+The prototype uses a vendor custom cluster instead of forcing LED Orchestra
+behavior into standard light clusters. Prototype cluster id: `0xFFF1FC00`. See
+[`../matter-prototype/cluster/led-orchestra.md`](../matter-prototype/cluster/led-orchestra.md)
+for the field/tag contract.
 
-Prototype cluster id: `0xFFF1FC00`.
+First commands: `SetScene`, `SetNodeConfig`, `SyncClock`. First status
+attributes: current scene, segment config, firmware version, last accepted
+sequence, last controller time. Program-bundle distribution (bundle id/version,
+distribute-then-activate, version status attribute) extends this contract.
 
-First commands:
-
-- `SetScene`: effect id, color, speed, brightness, sequence, and scheduled
-  start time.
-- `SetNodeConfig`: node id, segment range, total LED count, and LED GPIO.
-- `SyncClock`: controller time for scheduled scene alignment.
-
-First status attributes:
-
-- Current scene.
-- Segment config.
-- Firmware version.
-- Last accepted sequence.
-- Last controller time.
-
-Use Matter group/multicast for all-node scene changes after at least two nodes
-are commissioned. Keep provisioning and per-node config unicast-only.
+Use Matter group/multicast for all-node scene/bundle activation after at least
+two nodes are commissioned. Keep provisioning and per-node config unicast-only.
 
 ## Offline OTA Flow
 
-OTA stays fully offline and uses the same role split as scene control (Phase 6
-target):
+OTA stays fully offline and uses the same role split as scene control (the OTA
+phase):
 
 ```text
-operator (laptop/mobile)
-  -> USB serial or controller-local Wi-Fi: signed + encrypted firmware image bytes
-  -> controller node: stores the image, acts as Matter OTA Provider
+operator (USB / Wi-Fi) or Kubernetes
+  -> signed + encrypted firmware image bytes
+  -> Hub C6: stores the image, acts as Matter OTA Provider
   -> Matter OTA over Thread
-  -> LED nodes: Matter OTA Requestors download + verify + apply
+  -> LED nodes: Matter OTA Requestors download + verify + decrypt + apply
 ```
 
-- The operator loads a **signed and encrypted** firmware image over USB serial
-  or controller-local Wi-Fi. The laptop/phone is still only ingress; it never
-  joins the Matter fabric.
-- The controller node stores the image and serves it as the local Matter OTA
-  Provider over the offline fabric. No image is fetched from the internet.
-- Each LED node is a Matter OTA Requestor: it downloads the image from the
-  provider, verifies the signature, decrypts it, and applies it, with USB
-  flashing kept as the recovery path.
-- **Two independent security layers:**
-  - *Matter fabric credentials* decide who may participate in the fabric and
-    invoke the OTA cluster.
-  - *Firmware image signing/encryption* decides which firmware a node will
-    accept and run.
-  A valid fabric member still cannot push firmware a node will not verify, and a
-  correctly signed image still cannot be delivered by a non-fabric device.
+- The image is loaded over USB serial, controller-local Wi-Fi, or the Kubernetes
+  link. The ingress source never joins the Matter fabric.
+- The hub serves it as the local Matter OTA Provider over the offline fabric. No
+  image is fetched from the internet.
+- Each LED node verifies the signature, decrypts, and applies, with USB flashing
+  kept as the recovery path.
+- **Two independent security layers:** Matter fabric credentials decide who may
+  invoke the OTA cluster; image signing/encryption decides what firmware a node
+  will run. The same two-layer model applies to signed program bundles.
 
 ## Adding An Effect
 
 1. Add a stable C++ effect id at the end of the effect-id list.
-2. Add the LED-node renderer implementation, preferably using FastLED once the
-   integration spike is accepted.
+2. Add the LED-node renderer implementation (FastLED once the spike is accepted).
 3. Add controller command parsing/help if the effect needs new parameters.
-4. Keep the Matter custom-cluster command contract stable unless the new effect
-   truly needs new fields.
-5. Build both ESP-IDF apps and validate the effect on physical LEDs.
+4. Keep the custom-cluster command contract stable unless the effect truly needs
+   new fields.
+5. Build both ESP-IDF apps and validate on physical LEDs.
 
 Do not reorder or reuse wire ids. Nodes and controllers may be updated at
-different times, especially after OTA support exists.
+different times, especially after OTA exists.
 
 ## Open Design Choices
 
-- **Open hardware risk:** whether ESP-Matter supports a Thread-only *embedded*
-  Matter controller on ESP32-C6, or whether the controller path needs an
-  explicit OpenThread Border Router role even though the system is fully
-  offline. Hardware validation in Phase 3 must confirm this. If a border-router
-  role turns out to be required, it is an implementation detail of the
-  controller node, not a reason to add Wi-Fi, a phone app, or the internet.
-  - *Bring-up evidence (Phase 3):* the operator Wi-Fi AP must be a standalone
-    `esp_wifi` softAP. CHIP's `ENABLE_WIFI_AP`/`ENABLE_WIFI_STATION` are kept off
-    so the Matter connectivity manager does not seize the radio and stop the AP.
-    With CHIP Wi-Fi off and no Thread SRP server / border router on the fabric
-    yet, Matter DNS-SD advertising over IP fails at boot
-    (`chip[DIS]: Failed to advertise ... : 3`). Offline Thread discovery is
-    expected to ride Thread SRP, so this failure is a concrete pointer at whether
-    an SRP-server/border-router role is needed on the controller. Resolve or
-    explain this while validating commissioning over BLE+Thread.
-- Exact Matter vendor id/product id and cluster ids for production.
-- Durable storage layout for Matter-provisioned `NodeConfig`.
-- OTA image storage limits on the controller node, and the operator transport
-  for loading images (USB serial or controller private AP for laptop/mobile
-  upload).
-- Operator UX after the USB serial prototype proves stable, including the exact
-  controller-local Wi-Fi shape (private AP vs. joining a private local network).
+- **Resolved — border router required.** Whether the controller path needs an
+  explicit OTBR is closed: it does (confirmed 2026-06-02). The remaining choice
+  is Option 2 vs. 3 vs. 4, gated by
+  [`controller-topology-validation.md`](controller-topology-validation.md).
+- **Hub validation.** Can one C6 stably run Matter controller + esp-thread-br
+  host + thin bundle gateway within heap/flash headroom at 20-node scale? This
+  selects Option 2 vs. the fallbacks. Likely the hub needs an 8/16 MB C6.
+- **Program-bundle contract.** Bundle schema, size limits, transfer mechanism
+  (cluster payload vs. BDX), versioning, and signing.
+- **Kubernetes↔hub contract.** Confirm MQTT, auth (mTLS/token), and the
+  telemetry-up shape.
+- **Production identity.** Matter VID/PID and cluster ids; durable NVS layout for
+  `NodeConfig`; secure boot, flash encryption, encrypted storage, and a
+  repeatable manufacturing partition process before any field use.
