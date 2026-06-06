@@ -26,8 +26,16 @@ in order: [docs/architecture.md](docs/architecture.md),
   Option 4 (Pi `ot-br-posix`).
 - **Kubernetes** is the off-board control plane (authoring/validation/scheduling
   of declarative program bundles); the hub stays thin and only caches/relays.
-- **Next implementation work:** Phase 4 border-router validation (Stage 0 first —
-  a *separate* Thread client resolving a node through the BR).
+- **Next implementation work:** Phase 4 **Stage 0 passed on hardware
+  (2026-06-04)** — a *separate* client resolved an LED node's `_matter._tcp`
+  through the C6 BR (host + RCP) and an operational-CASE `SetScene` rendered,
+  once the commissioner's Wi-Fi softAP was dropped to clear single-radio (Wi-Fi
+  + BLE + 802.15.4) contention. Next is **Stage 1: co-locate the controller onto
+  the BR host** (the Option 2 Hub candidate; radio stays on the RCP), with the
+  proven split (Option 3) as the fallback. See
+  [docs/controller-topology-validation.md](docs/controller-topology-validation.md)
+  and the 2026-06-04 entry in
+  [docs/debugging-journal.md](docs/debugging-journal.md).
 
 ## Invariants (do not break)
 

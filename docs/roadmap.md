@@ -66,7 +66,8 @@ scene through a real border router.
 
 ## Phase 4: Border-Router Topology Validation
 
-Status: **next implementation work.** This phase runs
+Status: **in progress — Stage 0 passed on hardware (2026-06-04); Stage 1 next.**
+This phase runs
 [`controller-topology-validation.md`](controller-topology-validation.md) and
 selects Option 2, 3, or 4.
 
@@ -75,9 +76,11 @@ OpenThread Border Router, and decide where the controller co-locates.
 
 Acceptance criteria (quantitative — see the validation doc for thresholds):
 
-- **Stage 0 (primary go/no-go):** a *separate* Thread client resolves an LED
-  node's `_matter._tcp` record through the BR (host + RCP) — not the BR resolving
-  its own record. `dns browse` returns the record instead of `Error 28`.
+- **Stage 0 (primary go/no-go) — [PASSED 2026-06-04]:** a *separate* Thread
+  client resolved an LED node's `_matter._tcp` record through the BR (host + RCP)
+  — not the BR resolving its own record. `dns browse` returned the record instead
+  of `Error 28`, and operational CASE then completed (a `SetScene` rendered) once
+  the commissioner's Wi-Fi softAP was dropped to clear single-radio contention.
 - From Stage 1 the controller is **co-located onto the BR host** (the Hub
   candidate) and commissions one LED node through operational CASE — resolving
   through its on-board BR — then renders `SetScene` over the custom cluster.
