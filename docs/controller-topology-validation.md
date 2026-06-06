@@ -109,6 +109,61 @@ Sequence:
 BR. If this fails, the C6 esp-thread-br DNS-SD path itself is not doing the job
 → jump to **Option 4** (`ot-br-posix`); no further C6 staging is worthwhile.
 
+**Execution.** The concrete, reproducible runbook — board roles, RCP↔host UART
+wiring, per-board build/flash commands, the bring-up sequence, expected healthy
+logs, the exact `dns browse` command, and a pass/fail evidence template — lives
+in
+[`../matter-prototype/stage0-br-validation/README.md`](../matter-prototype/stage0-br-validation/README.md).
+The four boards map to: BR-host C6 (`ot_br`) + RCP C6 (`ot_rcp`) for the border
+router; the existing `led-node` (unchanged) as the SRP publisher; and the
+`controller-node` app — built with its border router/SRP server **off**
+(`sdkconfig.client.defaults`) — as the *separate client / controller stand-in*,
+i.e. exactly the Option 3 controller role used here to isolate the BR's
+discovery. Only the BR-host and client need a serial console at runtime, so the
+run fits a two-port host.
+
+Per the offline product shape, Stage 0 runs the **backbone-less BR first**. A
+**Wi-Fi-backbone BR** is kept only as a *diagnostic fallback* (run on FAIL) to
+localize whether a failure is the border-router init / advertising-proxy / OMR
+path rather than the C6 BR path itself; that Wi-Fi is the BR-host's backbone only
+and carries no LED control. The committed config overlays
+(`sdkconfig.rcp.defaults`, `sdkconfig.rcp-sidepins.defaults`,
+`sdkconfig.br-host.defaults`, `sdkconfig.br-host-wifi.defaults`,
+`sdkconfig.client.defaults`) plus `rebuild-sidepins.sh` capture the exact
+non-default settings and the XIAO side-pin BR/RCP patch used in the hardware
+run.
+
+**Status (2026-06-04):** Stage 0 hardware run completed with the XIAO side-pin
+BR/RCP build (`D6/GPIO16` TX crossed to `D7/GPIO17` RX). The BR-host reached
+`leader`, the SRP server reached `running`, `rcp version` succeeded, the
+separate client joined the BR mesh, and the client resolved the real LED
+`_matter._tcp` service through the BR:
+
+```text
+525E53F22D34B3AE-0000000000000002
+Port:5540
+Host:120633A3E1E984B0.default.service.arpa.
+HostAddress:fd42:957b:9cb6:4fbc:d25c:e012:d49c:57d6
+```
+
+This retires the original BR DNS-SD `Error 28: ResponseTimeout` failure for the
+separate-client topology.
+
+The follow-on operational `error 32` (`0x32` = `CHIP_ERROR_TIMEOUT`) is now also
+resolved, so **Stage 0 is a full PASS (discovery + operational CASE).** Root
+cause: single-C6 radio contention — the commissioner was running its operator
+Wi-Fi softAP **and** BLE **and** native 802.15.4 on one 2.4 GHz PHY, starving
+CHIP's operational discovery/CASE. Fix: disable the operator Wi-Fi AP on the
+commissioner build (`sdkconfig.client.defaults` →
+`CONFIG_LED_ORCHESTRA_OPERATOR_WIFI_MODE_DISABLED=y`, plus OT buffers 128 as
+headroom). Validated **operationally without re-commissioning** (the node stayed
+on the fabric — `error 32` fires after device commit): the controller resolved
+node `2` through the BR, established a CASE session (`read-attr`, no timeout), and
+a custom-cluster `SetScene` rendered solid red on the LED. The OT message pool
+peaked at `14/128`, so removing the Wi-Fi PHY — not the buffer bump — was the
+operative fix. Full detail + decisive evidence: the 2026-06-04 entry in
+[debugging-journal.md](debugging-journal.md). Stage 1 is unblocked.
+
 ### Stage 1 — Minimal Controller, One Node
 
 Co-locate minimal Matter controller behavior onto the BR host (the Option 2 Hub

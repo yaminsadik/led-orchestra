@@ -1,0 +1,23 @@
+# Stage 0 RCP side-pin overlay - use XIAO ESP32C6 side pins D6/D7 instead of
+# the tiny MTDI/MTMS back pads.
+#
+# XIAO ESP32C6 mapping used here:
+#   D6 = GPIO16 = TX
+#   D7 = GPIO17 = RX
+#
+# Crossover wiring:
+#   BR-host D6 / GPIO16 / TX  --->  RCP D7 / GPIO17 / RX
+#   BR-host D7 / GPIO17 / RX  <---  RCP D6 / GPIO16 / TX
+#   BR-host GND              <-->   RCP GND
+
+CONFIG_IDF_TARGET="esp32c6"
+
+# Keep flash/log console on native USB-Serial/JTAG so the side-pin UART is
+# dedicated to the spinel link.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Dedicated RCP host link over UART, matching the BR-host side-pin build.
+CONFIG_OPENTHREAD_RCP_UART=y
+CONFIG_OPENTHREAD_UART_PIN_MANUAL=y
+CONFIG_OPENTHREAD_UART_RX_PIN=17
+CONFIG_OPENTHREAD_UART_TX_PIN=16

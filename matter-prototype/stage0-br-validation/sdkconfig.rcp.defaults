@@ -1,0 +1,26 @@
+# Stage 0 RCP overlay — layered on top of $IDF_PATH/examples/openthread/ot_rcp/sdkconfig.defaults
+#
+# Role: dedicated IEEE 802.15.4 radio co-processor (RCP) for the BR-host C6. It is
+# pure radio — no operator console, no Thread stack of its own. Flashed once over
+# USB, then powered from a hub. See README.md for wiring and the run sequence.
+
+CONFIG_IDF_TARGET="esp32c6"
+
+# Move the log/flash console to the native USB-Serial/JTAG so hardware UART0 is
+# free for the spinel link, and a single USB cable can flash the board.
+# IMPORTANT: flash the RCP through the C6's *native USB* port, not a USB-UART
+# bridge port — the bridge would use UART0, which is the spinel link here.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Spinel over UART (not SPI), 460800 baud — matches the host's radio UART
+# (ot_br radio UART defaults: port 1, 460800).
+CONFIG_OPENTHREAD_RCP_UART=y
+
+# Pin the spinel UART explicitly so the RCP<->host wiring is unambiguous and
+# matches the host side (ot_br radio UART RX=GPIO4, TX=GPIO5). Crossover wiring:
+#   BR-host GPIO5 (TX) ---> RCP GPIO4 (RX)
+#   BR-host GPIO4 (RX) <--- RCP GPIO5 (TX)
+#   BR-host GND       <-->  RCP GND       (common ground is mandatory)
+CONFIG_OPENTHREAD_UART_PIN_MANUAL=y
+CONFIG_OPENTHREAD_UART_RX_PIN=4
+CONFIG_OPENTHREAD_UART_TX_PIN=5

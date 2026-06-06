@@ -1,0 +1,54 @@
+# Stage 0 client / controller-stand-in overlay — layered on top of the
+# controller-node app's own defaults:
+#   matter-prototype/controller-node/sdkconfig.defaults ;
+#   matter-prototype/controller-node/sdkconfig.defaults.local ;
+#   THIS FILE
+#
+# Role: the "separate Thread client" of controller-topology-validation.md — a
+# Matter commissioner that JOINS the BR-host's Thread mesh over its OWN native
+# 802.15.4 radio and resolves the LED node's _matter._tcp record THROUGH the BR.
+# This is exactly the Option 3 controller role (separate controller C6 + BR-host
+# C6), used here in Stage 0 to isolate the BR's discovery from co-location.
+#
+# The decisive change vs. the normal controller build: this node is NOT its own
+# border router / SRP server. Co-locating the SRP/DNS-SD owner with the
+# commissioner is precisely what failed on 2026-06-02 (debugging-journal.md). Here
+# the BR-host is the sole SRP/DNS-SD owner; this node is only a client of it.
+
+# Turn OFF the on-board border router so the BR-host owns SRP/DNS-SD alone. This
+# also removes the `srp server` subcommand from `matter esp ot_cli` on this node —
+# intended; it must never run its own SRP server in Stage 0.
+CONFIG_OPENTHREAD_BORDER_ROUTER=n
+
+# Keep the SRP + DNS *clients*: the node registers/looks up operational records
+# through the BR-host's DNS-SD server. `dns browse` lives in the DNS client.
+CONFIG_OPENTHREAD_SRP_CLIENT=y
+CONFIG_OPENTHREAD_DNS_CLIENT=y
+
+# --- Commissioning fix (2026-06-04): relieve single-radio contention ---
+# The 2026-06-04 hardware run reached DNS-SD PASS but the operational CASE
+# session timed out: the client logged
+#   OperationalSessionSetup[1:0000000000000002]: operational discovery failed: 32
+# 0x32 = CHIP_ERROR_TIMEOUT (CHIPError.h). CHIP's *internal* AddressResolve/CASE
+# timed out even though the manual `dns resolve` CLI path succeeded. Root-cause
+# hypothesis: the single C6 2.4 GHz radio was serving three PHYs at once
+# (Wi-Fi softAP + BLE PASE + native 802.15.4 Thread), and the OpenThread message
+# pool was exhausted mid-CASE (`bufferinfo` showed free:1, max-used:65 == the
+# default pool of 65). The LED commissionee — a single C6 running only BLE+Thread
+# — joined fine, so the differentiator is the client's extra load, not the radio
+# count. These two settings remove the third PHY and grow the pool so the
+# fragmented CASE Sigma2 has buffers. (Decisive test: if CASE still times out
+# with only BLE+Thread, move commissioning to the RCP-offloaded BR-host / Stage 1.)
+
+# Drop the operator Wi-Fi softAP for Stage 0 commissioning. The operator ingress
+# mode is a Kconfig `choice`; selecting the DISABLED member makes
+# controller_wifi_ingress_start() take its no-op branch (never calls
+# esp_wifi_start), so the Wi-Fi PHY stays off and only BLE + 802.15.4 contend.
+# (Wi-Fi is operator ingress only and carries no LED control, so dropping it for a
+# bench commissioning run changes nothing about the validation under test.)
+CONFIG_LED_ORCHESTRA_OPERATOR_WIFI_MODE_DISABLED=y
+
+# Grow the OpenThread message-buffer pool from the default 65 so the heavily
+# fragmented CASE Sigma2 (certificates, >1 KB over 6LoWPAN) does not starve the
+# pool during the BLE->Thread handoff. ~128 B/buffer, so 128 buffers adds ~8 KB.
+CONFIG_OPENTHREAD_NUM_MESSAGE_BUFFERS=128

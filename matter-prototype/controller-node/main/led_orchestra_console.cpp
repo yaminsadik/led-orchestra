@@ -97,6 +97,11 @@ esp_err_t send_invoke(uint64_t destination, uint16_t endpoint, uint32_t command,
 
 int set_scene_handler(int argc, char **argv)
 {
+    // esp_console passes the command name as argv[0]; drop it so the positional
+    // parsing below is 0-based over the real arguments.
+    argc--;
+    argv++;
+
     if (argc < 6 || argc > 8) {
         ESP_LOGE(TAG, "usage: lo-set-scene <node-id|group-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]");
         return ESP_ERR_INVALID_ARG;
@@ -137,6 +142,11 @@ int set_scene_handler(int argc, char **argv)
 
 int set_node_config_handler(int argc, char **argv)
 {
+    // esp_console passes the command name as argv[0]; drop it so the positional
+    // parsing below is 0-based over the real arguments.
+    argc--;
+    argv++;
+
     if (argc != 7) {
         ESP_LOGE(TAG, "usage: lo-set-node-config <node-id> <endpoint-id> <orchestra-node-id> <segment-start> <segment-len> <total-leds> <led-gpio>");
         return ESP_ERR_INVALID_ARG;
@@ -168,6 +178,11 @@ int set_node_config_handler(int argc, char **argv)
 
 int sync_clock_handler(int argc, char **argv)
 {
+    // esp_console passes the command name as argv[0]; drop it so the positional
+    // parsing below is 0-based over the real arguments.
+    argc--;
+    argv++;
+
     if (argc < 2 || argc > 3) {
         ESP_LOGE(TAG, "usage: lo-sync-clock <node-id|group-id> <endpoint-id> [controller-time-ms]");
         return ESP_ERR_INVALID_ARG;

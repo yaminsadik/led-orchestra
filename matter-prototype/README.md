@@ -66,7 +66,8 @@ the `archive/rust-phase-2` branch.
 4. Flash one LED node and one controller node.
 5. Bring up a real OpenThread Border Router (esp-thread-br host + RCP) that owns
    Thread/SRP/DNS-SD, and prove a *separate* Thread client resolves the LED node
-   through it (Stage 0 of the topology validation).
+   through it (Stage 0 of the topology validation). Runbook + config overlays:
+   [`stage0-br-validation/README.md`](stage0-br-validation/README.md).
 6. Commission the LED node into the private fabric through the border router.
 7. Run `lo-set-scene`; confirm physical LED response.
 8. Add a second LED node and test group scene commands.

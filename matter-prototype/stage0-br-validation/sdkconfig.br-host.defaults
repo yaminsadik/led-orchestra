@@ -1,0 +1,28 @@
+# Stage 0 BR-host overlay — layered on top of $IDF_PATH/examples/openthread/ot_br/sdkconfig.defaults
+#
+# Role: the real OpenThread Border Router host. Drives the RCP C6 over UART and
+# owns Thread / SRP server / DNS-SD for the mesh. This is the PRIMARY,
+# backbone-LESS (fully offline) config: no Wi-Fi/Ethernet backbone; Thread and the
+# SRP server are brought up by hand in the runbook. The Wi-Fi-backbone diagnostic
+# fallback layers sdkconfig.br-host-wifi.defaults on top of this file.
+#
+# ot_br/sdkconfig.defaults already sets CONFIG_OPENTHREAD_BORDER_ROUTER=y and the
+# spinel radio over UART (CONFIG_OPENTHREAD_RADIO_SPINEL_UART=y, port 1, RX=GPIO4,
+# TX=GPIO5, 460800). This overlay only changes target, console, and start mode.
+
+CONFIG_IDF_TARGET="esp32c6"
+
+# Operator console + OpenThread `ot_cli` shell over the native USB-Serial/JTAG so a
+# single USB cable both flashes the board and carries the CLI. Hardware UART1
+# (GPIO4/5) stays dedicated to the spinel link with the RCP.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_OPENTHREAD_CONSOLE_TYPE_USB_SERIAL_JTAG=y
+
+# Manual bring-up: do NOT auto-connect Wi-Fi / auto-form Thread. Two reasons:
+#  1) the offline run brings up Thread + the SRP server by hand (see runbook);
+#  2) it avoids the example's hard "No backbone netif!" build error, which the
+#     auto-start path requires a Wi-Fi/Ethernet backbone to satisfy.
+CONFIG_OPENTHREAD_BR_AUTO_START=n
+
+# Surface SRP / MLE / Thread activity while validating discovery.
+CONFIG_OPENTHREAD_LOG_LEVEL_NOTE=y

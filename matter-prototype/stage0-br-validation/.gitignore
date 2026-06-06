@@ -1,0 +1,7 @@
+# Per-build state for the Stage 0 validation firmware — never commit it.
+build/
+sdkconfig
+sdkconfig.old
+
+# Local Wi-Fi-backbone fallback credentials (never commit real SSID/PSK).
+sdkconfig.br-host-wifi.local.defaults

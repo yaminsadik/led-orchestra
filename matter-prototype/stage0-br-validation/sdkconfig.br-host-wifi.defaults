@@ -1,0 +1,30 @@
+# Stage 0 Wi-Fi-backbone DIAGNOSTIC FALLBACK overlay.
+# Layer order:  ot_br/sdkconfig.defaults ; sdkconfig.br-host.defaults ; THIS FILE
+#
+# Use this ONLY if the primary backbone-less run fails with `Error 28:
+# ResponseTimeout`. It brings the BR up the way Espressif's esp-thread-br
+# reference does: a Wi-Fi backbone on the BR-host only, with auto-start. That path
+# calls esp_openthread_border_router_init() (advertising proxy + border routing +
+# OMR prefix) once Wi-Fi connects — the machinery the offline/manual run does NOT
+# perform. Comparing the two runs tells us whether the missing piece is that
+# border-router init (a config/bring-up gap) rather than the C6 BR/DNS-SD path
+# itself being broken.
+#
+# This Wi-Fi is the BR-HOST's backbone only. It carries NO LED control. LED nodes
+# stay Thread-only and the controller still drives them over Matter/Thread.
+# A LOCAL access point is fine — no internet is required.
+
+# Auto-start: join Wi-Fi and form the Thread network on boot, then init the BR.
+CONFIG_OPENTHREAD_BR_AUTO_START=y
+CONFIG_EXAMPLE_CONNECT_WIFI=y
+
+# Do NOT commit real credentials. Either (a) run `idf.py menuconfig` and set the
+# SSID/PSK under "Example Connection Configuration", or (b) copy this file to
+# sdkconfig.br-host-wifi.local.defaults (gitignored), fill the two lines below,
+# and add it to the SDKCONFIG_DEFAULTS chain. Placeholders are intentionally not
+# valid credentials.
+CONFIG_EXAMPLE_WIFI_SSID="REPLACE_WITH_LOCAL_AP_SSID"
+CONFIG_EXAMPLE_WIFI_PASSWORD="REPLACE_WITH_LOCAL_AP_PSK"
+
+# ESP CLI extension provides the `wifi` command (handy to re-join manually).
+CONFIG_OPENTHREAD_CLI_ESP_EXTENSION=y
