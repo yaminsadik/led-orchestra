@@ -1,0 +1,36 @@
+# Stage C — co-located one-board hub overlay.
+#
+# Layered ON TOP OF the esp-matter controller example's OTBR defaults:
+#   $ESP_MATTER_PATH/examples/controller/sdkconfig.defaults.otbr ; THIS FILE
+# (build-s3-hub.sh build-hub passes exactly that, with set-target esp32s3.)
+#
+# Role: prove the ESP32-S3 can host BOTH the Matter commissioner/controller AND
+# the esp-thread-br host while the on-board ESP32-H2 is the RCP. The upstream
+# sdkconfig.defaults.otbr already enables: OTBR (CONFIG_OPENTHREAD_BORDER_ROUTER),
+# the Matter controller + commissioner, Wi-Fi station, platform mDNS
+# (CONFIG_USE_MINIMAL_MDNS=n), the OT SRP/DNS *clients* OFF (the BR owns SRP/DNS),
+# USB-Serial/JTAG console, PSRAM external alloc, and the partitions_br.csv layout
+# (factory app + an rcp_fw SPIFFS for host-side RCP update). This overlay only
+# adapts that to the ESP Thread BR board.
+
+# --- Flash: the board is 8 MB; the OTBR defaults assume 4 MB. ---
+# Overriding to 8 MB lets factory(3000K) + rcp_fw(600K) leave >50% headroom, which
+# is what the validation flash-headroom gate wants (>=25%). partitions_br.csv is
+# unchanged; only the flash-size ceiling moves.
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+# --- Spinel link: drive the on-board H2 RCP over UART, explicitly. ---
+# rx=GPIO17 / tx=GPIO18 @ 460800 and RCP update reset=7 / boot=8 are baked into the
+# controller example's main/esp_ot_config.h; selecting UART RCP here makes the
+# radio mode unambiguous on esp32s3 (no native 802.15.4).
+CONFIG_OPENTHREAD_RADIO_SPINEL_UART=y
+
+# --- PSRAM: the board's 2 MB PSRAM is quad-line (re-assert for clarity). ---
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+
+# --- Logging: surface SRP / MLE / Thread + RCP-update activity while validating
+#     discovery (matches the Stage 0 BR-host log level). ---
+CONFIG_OPENTHREAD_LOG_LEVEL_DYNAMIC=n
+CONFIG_OPENTHREAD_LOG_LEVEL_NOTE=y

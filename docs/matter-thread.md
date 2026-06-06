@@ -14,9 +14,11 @@ those role definitions (control plane vs. UI/operator ingress vs. Matter
 controller vs. Thread Border Router vs. RCP vs. OTA Provider/Requestor) apply
 throughout this document.
 
-The production controller/border-router topology is a validation-gated decision
-(Option 2 Hub C6 + RCP, with all-C6 Option 3 and Pi Option 4 fallbacks). The
-canonical statement and the experiment that selects it are in
+The production controller/border-router topology is a validation-gated decision.
+**Amended 2026-06-06:** the primary target is the **S3+H2 one-board hub** (ESP32-S3
+Matter controller + esp-thread-br host + ESP32-H2 RCP), with the proven all-C6
+split and a Pi `ot-br-posix` as fallbacks. The canonical statement and the
+experiment that selects it are in
 [`controller-topology-adr.md`](controller-topology-adr.md) and
 [`controller-topology-validation.md`](controller-topology-validation.md).
 
@@ -70,9 +72,9 @@ stack are C++-native.
 The controller node is the Matter controller/commissioner in the private fabric
 and the local source of truth for scenes, node inventory, groups, and (later)
 OTA images. Hardware bring-up established it needs a real OpenThread Border
-Router, so under the locked decision it evolves into the **Hub C6** (Option 2):
-Matter controller + esp-thread-br host (with an RCP C6 for the radio) + a thin
-Kubernetes bundle gateway. See
+Router, so under the amended decision it evolves into the **S3+H2 one-board hub**:
+Matter controller + esp-thread-br host on the **ESP32-S3** (with an on-board
+**ESP32-H2 RCP** for the radio) + a thin Kubernetes bundle gateway. See
 [`controller-topology-adr.md`](controller-topology-adr.md).
 
 - Receives operator intent and OTA image bytes over USB serial or the controller
@@ -145,8 +147,8 @@ Prototype implementation notes:
   `Error 28: ResponseTimeout`) because an infra-less SoC has no mDNS/advertising
   proxy to answer its own DNS-SD probes. The `CONFIG_ENABLE_ROUTE_HOOK=y`
   experiment was tried and ruled out. The controller path therefore requires a
-  real OpenThread Border Router; how much of the controller co-locates with it is
-  the validation-gated Option 2/3/4 choice. See
+  real OpenThread Border Router; where the controller co-locates with it is the
+  validation-gated choice (S3+H2 hub → all-C6 split → Pi). See
   [`controller-topology-adr.md`](controller-topology-adr.md),
   [`controller-topology-validation.md`](controller-topology-validation.md), and
   [`debugging-journal.md`](debugging-journal.md). Station mode remains a

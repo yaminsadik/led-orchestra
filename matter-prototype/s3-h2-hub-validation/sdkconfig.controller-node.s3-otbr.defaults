@@ -1,0 +1,63 @@
+# SCAFFOLD — NOT YET GATED.
+#
+# S3+OTBR build overlay for the LED Orchestra controller-node app
+# (matter-prototype/controller-node). It expresses the intended path for folding
+# the hub onto OUR app AFTER the Stage C gate passes with the stock esp-matter
+# controller example. It is committed as a starting point, NOT a working build
+# (see "Known gaps" at the bottom). Per the hybrid Stage C choice: gate first with
+# the stock controller example, then fold the lo-* helpers onto the hub here.
+#
+# Intended layering (once the app is integration-ready), set-target esp32s3:
+#   matter-prototype/controller-node/sdkconfig.defaults ;
+#   matter-prototype/controller-node/sdkconfig.defaults.local ;   # gitignored AP creds (or keep the AP disabled, below)
+#   THIS FILE
+
+# --- Target + radios: S3 host, on-board H2 RCP over UART (pins 17/18, see
+#     controller-node/main/esp_ot_config.h's BR branch). ---
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_OPENTHREAD_ENABLED=y
+CONFIG_OPENTHREAD_BORDER_ROUTER=y
+CONFIG_OPENTHREAD_RADIO_SPINEL_UART=y
+# The BR owns SRP/DNS-SD; keep the OT SRP/DNS *clients* off on the host, like the
+# stock OTBR build (the BR's own server answers operational discovery).
+CONFIG_OPENTHREAD_SRP_CLIENT=n
+CONFIG_OPENTHREAD_DNS_CLIENT=n
+# Offline-first: bring up Thread + the SRP server by hand (see the Stage C runbook).
+CONFIG_OPENTHREAD_BR_AUTO_START=n
+CONFIG_OPENTHREAD_LOG_LEVEL_DYNAMIC=n
+CONFIG_OPENTHREAD_LOG_LEVEL_NOTE=y
+# The BR installs its own route hook.
+CONFIG_ENABLE_ROUTE_HOOK=n
+
+# --- Wi-Fi: the S3's Wi-Fi is ingress/backbone + platform mDNS only, never LED
+# control. The single-radio contention that hit the all-C6 commissioner does NOT
+# apply here (Wi-Fi/BLE on S3, 802.15.4 on H2), so the operator AP could stay; but
+# for the first offline gate, prefer the no-op ingress to keep bring-up minimal. ---
+CONFIG_LED_ORCHESTRA_OPERATOR_WIFI_MODE_DISABLED=y
+
+# --- Flash + PSRAM for the 8 MB / 2 MB-PSRAM board. ---
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_ESP_MATTER_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# --- Console over the board's USB-Serial/JTAG (UART1 GPIO17/18 is the spinel link). ---
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# === Known gaps before this overlay BUILDS (gated behind the stock-example pass) ===
+#  1) esp-thread-br dependency: controller-node/main/idf_component.yml must pull
+#     espressif/esp-thread-br (+ espressif/esp-ot-cli-extension) like the BR /
+#     controller examples, and the BR host bring-up + esp_rcp_update must be wired
+#     into app_main.cpp.
+#  2) Partition table: add a partitions_br-style CSV with an `rcp_fw` SPIFFS for
+#     CONFIG_AUTO_UPDATE_RCP, and select it here
+#     (CONFIG_PARTITION_TABLE_CUSTOM=y + CONFIG_PARTITION_TABLE_CUSTOM_FILENAME).
+#  3) The matter controller/commissioner enables our app needs for invoke-cmd
+#     (mirror the controller example's CONFIG_ESP_MATTER_CONTROLLER_ENABLE etc.,
+#     or keep using the device-side commissioning path the app already has).
+#  esp_ot_config.h already carries the UART-RCP + RCP-update path under
+#  CONFIG_OPENTHREAD_BORDER_ROUTER && CONFIG_OPENTHREAD_RADIO_SPINEL_UART.

@@ -1,11 +1,13 @@
 # Controller Node Prototype
 
-The controller node is an ESP32-C6 Matter controller/commissioner for the
-private LED Orchestra fabric, and the local source of truth for scenes, node
-inventory, and groups. Hardware bring-up established it needs a real OpenThread
-Border Router, so under the locked decision it evolves into the **Hub** (Matter
-controller + esp-thread-br host, with an **RCP C6** radio) plus a thin Kubernetes
-bundle gateway — the validation-gated Option 2. See
+The controller node is a Matter controller/commissioner for the private LED
+Orchestra fabric, and the local source of truth for scenes, node inventory, and
+groups. Hardware bring-up established it needs a real OpenThread Border Router, so
+under the amended decision it evolves into the **S3+H2 one-board hub** (Matter
+controller + esp-thread-br host on the **ESP32-S3**, with an **ESP32-H2 RCP**
+radio) plus a thin Kubernetes bundle gateway — the validation-gated primary
+target. As an `esp32c6` build it is also the commissioner in the proven all-C6
+split fallback. See
 [`../../docs/controller-topology-adr.md`](../../docs/controller-topology-adr.md).
 
 It receives operator intent over USB serial and controller-local Wi-Fi, and
@@ -16,7 +18,9 @@ required to render scenes.
 
 ## Acceptance Criteria
 
-- Builds with ESP-IDF/ESP-Matter for target `esp32c6`.
+- Builds with ESP-IDF/ESP-Matter for target `esp32c6` (the all-C6 fallback
+  commissioner); the S3+H2 hub variant targets `esp32s3` with the esp-thread-br
+  host + H2 RCP (see the S3+OTBR scaffold in `../s3-h2-hub-validation/`).
 - Provides USB serial commands for commissioning, listing nodes, setting scenes,
   setting node config, syncing clocks, and loading OTA images. Provides
   controller-local Wi-Fi ingress through a private AP by default; station mode
@@ -37,6 +41,12 @@ required to render scenes.
   - `lo-set-scene <node-id|group-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]`
   - `lo-set-node-config <node-id> <endpoint-id> <orchestra-node-id> <segment-start> <segment-len> <total-leds> <led-gpio>`
   - `lo-sync-clock <node-id|group-id> <endpoint-id> [controller-time-ms]`
+- **Staged (not yet gated):** an S3+OTBR build path for this app — a committed
+  `sdkconfig.controller-node.s3-otbr.defaults` overlay and a UART-RCP variant of
+  `main/esp_ot_config.h` — lives in
+  [`../s3-h2-hub-validation/`](../s3-h2-hub-validation/). It compiles toward the
+  S3+H2 hub but is **not** proven: the Stage C gate is run with the stock
+  esp-matter `controller` example first, then this app is folded in.
 
 For opening the monitor, log verbosity, the built-in command groups, and the
 full terminal command reference, see [`docs/console.md`](../../docs/console.md).
@@ -67,8 +77,8 @@ manager takes over the radio, forces STA, and stops the operator AP
 Resolved finding: with CHIP Wi-Fi off and no border router present, Matter
 operational discovery times out — an infra-less single C6 cannot self-resolve
 its DNS-SD records. The controller path therefore requires a real OpenThread
-Border Router; the next work is selecting Option 2/3/4 via the topology
-validation. See
+Border Router; the next work is the S3+H2 one-board hub validation (Stages A-F),
+with the all-C6 split and Pi as fallbacks. See
 [`../../docs/controller-topology-adr.md`](../../docs/controller-topology-adr.md)
 and [`../../docs/debugging-journal.md`](../../docs/debugging-journal.md).
 
@@ -82,8 +92,10 @@ devices and do not move Matter control off the controller node.
 The `sdkconfig.defaults` file records the intended private-fabric controller
 direction. It currently uses Thread, enables controller-local private AP ingress
 by default, and disables WiFi station mode unless deliberately selected through
-Kconfig. Under the locked decision this app grows the esp-thread-br host role (or
-joins a separate BR's mesh in Option 3); see
+Kconfig. Under the amended decision this app grows the esp-thread-br host role on
+the **ESP32-S3** (driving the **ESP32-H2 RCP** over UART), or joins a separate
+BR's mesh over its native radio in the all-C6 split fallback; the committed S3+H2
+overlays live in [`../s3-h2-hub-validation/`](../s3-h2-hub-validation/). See
 [`../../docs/controller-topology-adr.md`](../../docs/controller-topology-adr.md).
 Operator Wi-Fi does not add venue Wi-Fi, internet, or LED-node Wi-Fi control.
 

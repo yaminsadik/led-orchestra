@@ -6,9 +6,10 @@ pieces, through a repeatable local command.
 
 The production controller/border-router topology is locked as a validation-gated
 decision; see [`controller-topology-adr.md`](controller-topology-adr.md) and
-[`controller-topology-validation.md`](controller-topology-validation.md). "Hub"
-below means the Option 2 Hub C6 (Matter controller + esp-thread-br host + thin
-Kubernetes gateway).
+[`controller-topology-validation.md`](controller-topology-validation.md).
+**Amended 2026-06-06:** "Hub" below means the **S3+H2 one-board hub** (Matter
+controller + esp-thread-br host on the ESP32-S3 + ESP32-H2 RCP + thin Kubernetes
+gateway); the all-C6 split is the proven fallback.
 
 ## Phase 1: One ESP32-C6 Drives One Strip
 
@@ -66,35 +67,41 @@ scene through a real border router.
 
 ## Phase 4: Border-Router Topology Validation
 
-Status: **in progress — Stage 0 passed on hardware (2026-06-04); Stage 1 next.**
+Status: **in progress — Stage 0 (all-C6) PASSED on hardware (2026-06-04). Amended
+2026-06-06: the S3+H2 one-board hub is now the primary candidate; Stages A-F next.**
 This phase runs
 [`controller-topology-validation.md`](controller-topology-validation.md) and
-selects Option 2, 3, or 4.
+selects the S3+H2 hub, the all-C6 split, or the Pi fallback.
 
 Goal: prove operational discovery and end-to-end control work through a real
 OpenThread Border Router, and decide where the controller co-locates.
 
 Acceptance criteria (quantitative — see the validation doc for thresholds):
 
-- **Stage 0 (primary go/no-go) — [PASSED 2026-06-04]:** a *separate* Thread
-  client resolved an LED node's `_matter._tcp` record through the BR (host + RCP)
-  — not the BR resolving its own record. `dns browse` returned the record instead
-  of `Error 28`, and operational CASE then completed (a `SetScene` rendered) once
-  the commissioner's Wi-Fi softAP was dropped to clear single-radio contention.
-- From Stage 1 the controller is **co-located onto the BR host** (the Hub
-  candidate) and commissions one LED node through operational CASE — resolving
-  through its on-board BR — then renders `SetScene` over the custom cluster.
+- **Stage 0 (all-C6, primary go/no-go for the fallback) — [PASSED 2026-06-04]:**
+  a *separate* Thread client resolved an LED node's `_matter._tcp` record through
+  the BR (host + RCP) — not the BR resolving its own record. `dns browse` returned
+  the record instead of `Error 28`, and operational CASE then completed (a
+  `SetScene` rendered) once the commissioner's Wi-Fi softAP was dropped to clear
+  single-radio contention.
+- **S3+H2 hub (primary target), Stages A-F:** inventory/toolchain (A); S3+H2 as a
+  BR-only baseline resolving for the separate C6 client (B); the **one-node
+  end-to-end gate** where the co-located S3 commissions one C6 LED, resolves it
+  through its own H2-backed BR, and renders `SetScene` over the custom cluster
+  (C); repeatability/recovery (D); ~20-node scale + ≥ 72 h soak (E); thin ingress
+  last (F).
 - Metrics hold at ~20-node scale and through a ≥ 72 h soak with ≥ 20 hard power
   cycles: min free heap, largest free block, no heap drift, 100% reboot recovery
-  and discovery, flash headroom (hub sized to 8/16 MB as needed).
+  and discovery, flash headroom (the S3+H2 board is 8 MB + 2 MB PSRAM).
 - A thin Kubernetes bundle gateway is added last and all metrics still pass.
 
 Decision mapping:
 
 ```text
-Stage 0 FAIL (separate client can't resolve through the BR) -> Option 4 (Pi / ot-br-posix)
-Stage 1+ co-located Hub FAILS (on-board discovery OR heap/stability) -> Option 3 (split, all-C6)
-Stages 0-4 PASS within headroom -> Option 2 (Hub C6 + RCP)
+Stage 0 (all-C6 split) PASSED 2026-06-04 (discovery + operational CASE).
+S3+H2 hub Stages A-F PASS within headroom -> S3+H2 one-board hub  [primary target]
+S3+H2 hub FAILS (one-board discovery OR heap/stability) -> all-C6 split (= Stage 0 config)
+C6/H2 esp-thread-br path itself not stable -> Pi / ot-br-posix
 ```
 
 ## Phase 5: Multi-Node Offline Thread Mesh
@@ -157,7 +164,7 @@ node-side USB cable, no internet).
 ```text
 operator (USB / Wi-Fi) or Kubernetes
   -> signed + encrypted image
-  -> Hub C6: stores image, acts as Matter OTA Provider
+  -> S3 hub: stores image, acts as Matter OTA Provider
   -> Matter OTA over Thread
   -> LED nodes: Matter OTA Requestors verify + decrypt + apply
 ```

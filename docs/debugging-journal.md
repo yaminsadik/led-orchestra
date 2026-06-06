@@ -462,3 +462,96 @@ rather than re-pairing:
 - [todo] Stage 1: the *co-located* Hub commissioner (radio on the RCP) is the
   production path and removes this native-radio contention by construction; the
   operator Wi-Fi AP can be re-enabled there and load-tested alongside BLE.
+  _(Superseded 2026-06-06: the co-located hub is now the S3+H2 board — controller
+  + esp-thread-br host on the ESP32-S3, radio on the ESP32-H2 RCP — see below.)_
+
+## 2026-06-06: Architecture Pivot To The S3+H2 Hub; S3 Toolchain Gap (Stage A)
+
+### Symptom
+
+Standing up the S3+H2 hub validation, the H2 RCP built fine for `esp32h2`, but
+every `esp32s3` build failed immediately at CMake configure:
+
+```text
+The CMAKE_ASM_COMPILER:  xtensa-esp32s3-elf-gcc
+is not a full path and was not found in the PATH.
+HINT: Try to reinstall the toolchain for the chip that you trying to use.
+```
+
+### Architecture At The Time
+
+2026-06-06 pivot: the preferred hub is no longer an all-C6 co-located Hub but the
+**Espressif ESP Thread BR board** — ESP32-S3 (Matter controller + esp-thread-br
+host) + ESP32-H2 RCP — driving Thread-only C6 LED nodes. The all-C6 split (Stage
+0) is now the proven fallback. Rationale: least wiring/role sprawl, and Wi-Fi/BLE
+(S3) + 802.15.4 (H2) on separate SoCs structurally removes the 2026-06-04
+single-C6 three-radio contention. See
+[`controller-topology-adr.md`](controller-topology-adr.md) (2026-06-06 amendment).
+
+### What Worked
+
+- ESP-IDF v5.4.1 + esp-matter v1.4.2 (pinned, unchanged) built `ot_rcp` for
+  `esp32h2`: `esp_ot_rcp.bin` 0x31a00 (~203 KB), 81% free in the 1 MB app partition.
+- The board's S3↔H2 pins match the stock examples (UART rx17/tx18; RCP update
+  reset7/boot8; bundled `/rcp_fw/ot_rcp`), so no SDK patching is needed — the
+  committed overlays layer onto stock `thread_border_router` / `controller`.
+
+### What Failed
+
+- All `esp32s3` builds (`thread_border_router`, `controller`+OTBR) — at configure,
+  before compiling anything.
+
+### Hypotheses And Experiments
+
+| Hypothesis | Experiment | Result |
+| --- | --- | --- |
+| ESP-IDF env not sourced | `idf.py --version` → v5.4.1; the H2 build worked | Rejected |
+| esp32s3 (Xtensa) toolchain not installed | `ls ~/.espressif/tools` → only `riscv32-esp-elf*` | **Confirmed** |
+
+### Decisive Evidence
+
+`~/.espressif/tools` held `riscv32-esp-elf`, `riscv32-esp-elf-gdb`, `cmake`,
+`ninja`, `openocd-esp32`, `esp-rom-elfs` — **no `xtensa-*`**. The repo had only
+ever targeted RISC-V chips (C6/H2), so the Xtensa toolchain was never installed.
+
+### Resolution
+
+Installed the S3 target compiler for the **same** pinned IDF (NOT a version
+upgrade), operator-approved 2026-06-06: `"$IDF_PATH/install.sh" esp32s3`, then
+re-sourced `export.sh`. `xtensa-esp32s3-elf-gcc` 14.2.0 then resolved under
+`~/.espressif/tools/xtensa-esp-elf/...` and `idf.py --version` stayed v5.4.1. Both
+S3 builds passed: `thread_border_router.bin` ~1.88 MB (19% app-partition free,
+`rcp_fw` bundled) and the `controller`+OTBR hub `controller.bin` ~2.29 MB (24%
+free). Finding F-A1 in
+[`../matter-prototype/s3-h2-hub-validation/stage-a-inventory.md`](../matter-prototype/s3-h2-hub-validation/stage-a-inventory.md).
+
+A second, smaller gotcha (**F-A2**) surfaced on the first S3 BR build: the
+`thread_border_router` (`CONFIG_AUTO_UPDATE_RCP=y`) generates its `rcp_fw` image
+from `CONFIG_RCP_SRC_DIR`, which defaults to the **in-tree**
+`$IDF_PATH/examples/openthread/ot_rcp/build`. We build the RCP out-of-tree, so the
+build died with `FileNotFoundError: .../ot_rcp/build/rcp_version`. Fixed by having
+`build-s3-hub.sh build_br` build the RCP first and override `CONFIG_RCP_SRC_DIR` to
+our `build/rcp-h2` via a gitignored defaults fragment.
+
+### Lessons
+
+- "All-C6" was load-bearing in the *toolchain*, not just the BOM: moving the hub
+  to an Xtensa S3 needs `install.sh esp32s3` once. A RISC-V-only install builds C6
+  and H2 but silently lacks the S3 compiler until you try.
+- A green H2 (RISC-V) build does not imply an S3 (Xtensa) build will even
+  configure — different architectures, different toolchains.
+- Out-of-tree example builds can still depend on an **in-tree default path**: the
+  BR's `esp_rcp_update` reads `CONFIG_RCP_SRC_DIR` (defaulting to the stock
+  `ot_rcp/build`), so an out-of-tree RCP build must be pointed at explicitly (F-A2).
+
+### Follow-Up
+
+- [done 2026-06-06] Operator approved + ran `install.sh esp32s3`; host-verified
+  `build-br` + `build-hub` on the pinned toolchain (sizes in Stage A). F-A1
+  resolved; F-A2 (RCP path) fixed in `build-s3-hub.sh`.
+- [todo] Run the S3+H2 Stages B/C on hardware; record discovery/CASE/SetScene
+  evidence — especially whether co-located discovery works **offline** or needs a
+  local Wi-Fi backbone — in
+  [`controller-topology-validation.md`](controller-topology-validation.md).
+- [todo] Re-measure flash headroom on the 8 MB board (the host build shows the
+  S3 app partition at 19%/24% free, at/under the 25% gate target).

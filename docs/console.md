@@ -199,7 +199,8 @@ controller could not discover the node's operational Matter service over Thread.
 
 > **Historical bring-up context — not current setup guidance.** The steps below
 > document the single-SoC investigation that led to the border-router decision.
-> The current direction is a real border router (Hub C6 + RCP, Option 2); see
+> The current direction is a real border router (the S3+H2 one-board hub; all-C6
+> split as fallback); see
 > [`controller-topology-adr.md`](controller-topology-adr.md). Do **not** treat the
 > on-device-resolution config below as the recommended setup.
 

@@ -1,0 +1,10 @@
+# Per-build state for the S3+H2 hub validation firmware — never commit it.
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# Local Wi-Fi-backbone credentials for the Stage C diagnostic (never commit real
+# SSID/PSK).
+sdkconfig.s3-otbr-controller.wifi.local.defaults

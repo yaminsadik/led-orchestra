@@ -1,0 +1,32 @@
+# Stage B — S3+H2 BR-only baseline overlay.
+#
+# Layered ON TOP OF the esp-matter thread_border_router example defaults:
+#   $ESP_MATTER_PATH/examples/thread_border_router/sdkconfig.defaults ; THIS FILE
+# (build-s3-hub.sh build-br passes exactly that, with set-target esp32s3.)
+#
+# Role: the ESP Thread BR board acting as a Thread Border Router ONLY (no Matter
+# controller). The separate ESP32-C6 controller-node (built with the Stage 0
+# sdkconfig.client.defaults: border router OFF, operator Wi-Fi OFF) is the
+# commissioner/resolver, and a C6 LED node is the accessory. This isolates the
+# board's BR/SRP/DNS-SD from co-location before Stage C trusts the co-located hub.
+#
+# The upstream thread_border_router/sdkconfig.defaults already sets: 8 MB flash,
+# OTBR on, OT SRP/DNS clients off, CONFIG_AUTO_UPDATE_RCP=y (the S3 flashes the H2
+# over the on-board reset=7/boot=8 pins), USB-Serial/JTAG console, SoftAP off,
+# platform mDNS, PSRAM quad, and the CHIP shell (so `matter esp ot_cli ...` is
+# available for manual bring-up). This overlay only changes start mode + logging.
+
+# --- Offline-first bring-up: do NOT auto-form / require a backbone. ---
+# Bring up Thread + the SRP server by hand in the runbook (matter esp ot_cli
+# dataset/ifconfig/thread start; srp server enable), exactly like Stage 0. If a
+# build/run insists on a backbone, the runbook's Wi-Fi-backbone diagnostic adds
+# `matter esp wifi connect` first (LED control still rides Thread, never Wi-Fi).
+CONFIG_OPENTHREAD_BR_AUTO_START=n
+
+# --- Spinel link: drive the on-board H2 RCP over UART, explicitly (esp32s3 has no
+#     native 802.15.4 radio). Pins (17/18) live in the example's esp_ot_config.h. ---
+CONFIG_OPENTHREAD_RADIO_SPINEL_UART=y
+
+# --- Logging: surface SRP / MLE / Thread + RCP-update activity. ---
+CONFIG_OPENTHREAD_LOG_LEVEL_DYNAMIC=n
+CONFIG_OPENTHREAD_LOG_LEVEL_NOTE=y

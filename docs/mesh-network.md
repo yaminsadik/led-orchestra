@@ -19,13 +19,13 @@ SRP record but cannot answer its own DNS-SD query, so operational discovery time
 out. The mesh therefore needs a real **OpenThread Border Router** that owns the
 Thread network and DNS-SD.
 
-The preferred target is **Option 2**: a **Hub C6** that co-locates the Matter
-controller and the esp-thread-br host, with a dedicated **RCP C6** for the radio.
-The diagram below shows that shape. Fallbacks split those roles onto separate C6s
-(Option 3) or use a Linux/Pi `ot-br-posix` (Option 4) — the mesh roles are the
-same, only where they run differs. See
-[`controller-topology-adr.md`](controller-topology-adr.md) for the validation-
-gated ladder, and [`debugging-journal.md`](debugging-journal.md) /
+The preferred target is the **S3+H2 one-board hub**: an **ESP32-S3** that
+co-locates the Matter controller and the esp-thread-br host, with an on-board
+**ESP32-H2 RCP** for the 802.15.4 radio. The diagram below shows that shape.
+Fallbacks split those roles onto separate C6s (the proven all-C6 Stage 0 split)
+or use a Linux/Pi `ot-br-posix` — the mesh roles are the same, only where they run
+differs. See [`controller-topology-adr.md`](controller-topology-adr.md) for the
+validation-gated ladder, and [`debugging-journal.md`](debugging-journal.md) /
 [`console.md`](console.md#ble-thread-pairing-requirement) for the evidence.
 
 ```mermaid
@@ -34,10 +34,10 @@ flowchart TB
         laptop["Laptop / phone / Kubernetes<br/>operator intent + bundles + OTA bytes"]
     end
 
-    subgraph hub["Hub C6 + RCP (Option 2 target)"]
-        ctrl["Matter commissioner / controller<br/>+ esp-thread-br host<br/>Thread Leader · SRP server · DNS-SD / mDNS proxy<br/>fabric 112233 · node 1"]:::ctrl
-        rcp["RCP C6<br/>802.15.4 radio"]:::infra
-        ctrl -->|"UART / SPI"| rcp
+    subgraph hub["S3+H2 one-board hub (primary target)"]
+        ctrl["ESP32-S3: Matter commissioner / controller<br/>+ esp-thread-br host<br/>Thread Leader · SRP server · DNS-SD / mDNS proxy<br/>fabric 112233 · node 1"]:::ctrl
+        rcp["ESP32-H2<br/>802.15.4 RCP radio"]:::infra
+        ctrl -->|"UART / SPI (on-PCB)"| rcp
     end
 
     subgraph mesh["Thread mesh — IEEE 802.15.4 · IPv6 · offline (no internet)"]
@@ -128,10 +128,10 @@ wave can span segment boundaries even though each node only drives its own LEDs.
 
 Matter is the application/security model; Thread is the offline IPv6 mesh; IEEE
 802.15.4 is the radio. LED nodes (and the Stage 0 separate client) run OpenThread
-on their **native** 2.4 GHz radio (`RADIO_MODE_NATIVE`). The Option 2 Hub is
-different: its esp-thread-br host drives a **separate RCP** over UART/SPI, so the
-host runs the OpenThread stack against the RCP's radio, not a native one. Do not
-carry the native-radio controller config into the Hub build.
+on their **native** 2.4 GHz radio (`RADIO_MODE_NATIVE`). The S3+H2 hub is
+different: its esp-thread-br host (S3) drives the **ESP32-H2 RCP** over UART/SPI,
+so the host runs the OpenThread stack against the RCP's radio, not a native one.
+Do not carry the native-radio controller config into the hub build.
 
 ```mermaid
 flowchart TB
@@ -200,10 +200,10 @@ Notes:
   for itself: the record exists in SRP storage, but nothing answers the
   controller's DNS-SD query. A real OTBR resolves it via its host mDNS /
   advertising-proxy layer.
-- In the Option 2 target, the controller (C) and border router (B) are the same
-  Hub board; Phase 4 Stage 0 first proves the split case (a *separate* client
-  resolving through the BR) before trusting the co-located case. See
-  [`controller-topology-validation.md`](controller-topology-validation.md).
+- In the S3+H2 hub target, the controller (C) and border router (B) are the same
+  board (the S3); Phase 4 Stage B first proves the split case (a *separate* C6
+  client resolving through the S3+H2 BR) before Stage C trusts the co-located
+  case. See [`controller-topology-validation.md`](controller-topology-validation.md).
 - After commissioning, the controller addresses nodes by Matter node id
   (unicast) for provisioning, and by group id `0x0001` (multicast) for all-node
   scene changes.
