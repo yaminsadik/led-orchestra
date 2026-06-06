@@ -79,16 +79,29 @@ record.
 
 ```mermaid
 flowchart LR
-    subgraph mesh["Thread mesh (offline)"]
-        br["BR-host C6 + RCP C6<br/>Thread Leader · SRP server · DNS-SD"]:::infra
-        client["Separate C6<br/>Thread node = controller stand-in<br/>DNS-SD client"]:::ctrl
-        led["LED node C6<br/>SRP client · registers _matter._tcp"]:::led
-        br <--> client
-        br <--> led
-    end
-    client -- "dns browse _matter._tcp" --> br
-    br -- "LED record (not Error 28)" --> client
+    laptop["Laptop<br/>USB-serial console + logs only<br/>not the commissioner"]:::host
 
+    subgraph brstack["Border-router infrastructure (the BR)"]
+        br["BR-host C6 (XIAO) · ot_br<br/>Thread Leader · SRP server · DNS-SD responder"]:::infra
+        rcp["RCP C6 (XIAO) · ot_rcp<br/>802.15.4 radio (RCP)"]:::infra
+        br <-- "UART spinel @460800<br/>D6/GPIO16 TX ↔ D7/GPIO17 RX (crossed)<br/>common GND" --> rcp
+    end
+
+    client["Controller / client C6 · controller-node (BR off)<br/>Matter commissioner · Thread router · DNS-SD client<br/>not a BR"]:::ctrl
+    led["LED node C6 · led-node<br/>Matter accessory · Thread device · SRP client"]:::led
+
+    laptop -- "USB serial" --> br
+    laptop -- "USB serial" --> client
+
+    rcp <-- "Thread mesh (offline)" --> client
+    rcp <-- "Thread mesh (offline)" --> led
+
+    client -. "BLE commissioning" .-> led
+    led -- "SRP registers _matter._tcp" --> br
+    client -- "dns browse _matter._tcp" --> br
+    br -- "returns LED record (not Error 28)" --> client
+
+    classDef host fill:#eeeeee,stroke:#888,color:#000;
     classDef infra fill:#fde2b3,stroke:#d98324,color:#000;
     classDef ctrl fill:#cfe8ff,stroke:#1d6fb8,color:#000;
     classDef led fill:#d6f5d6,stroke:#2e8b57,color:#000;
