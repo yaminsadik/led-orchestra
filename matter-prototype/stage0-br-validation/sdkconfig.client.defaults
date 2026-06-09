@@ -52,3 +52,9 @@ CONFIG_LED_ORCHESTRA_OPERATOR_WIFI_MODE_DISABLED=y
 # fragmented CASE Sigma2 (certificates, >1 KB over 6LoWPAN) does not starve the
 # pool during the BLE->Thread handoff. ~128 B/buffer, so 128 buffers adds ~8 KB.
 CONFIG_OPENTHREAD_NUM_MESSAGE_BUFFERS=128
+
+# Attempted workaround from the 2026-06-09 node-2 run. This is harmless headroom
+# in the ESP-IDF console layer, but it is NOT the root fix for `pairing
+# ble-thread` no-ops: the USB-Serial/JTAG/CHIP shell path still needs paced
+# writes. See debugging-journal.md "Node 2 Commissioned; Next-Node Runbook".
+CONFIG_CONSOLE_MAX_COMMAND_LINE_LENGTH=1024

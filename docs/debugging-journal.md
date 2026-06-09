@@ -993,3 +993,79 @@ Stage B gate: **PASS** end-to-end.
   is WS2812B (GRB); the bench strip is WS2815 (RGB). Candidate: a Kconfig strip
   color-order option (default GRB) instead of the current hardcoded bench swap.
 - Proceed to Stage C (co-located one-board hub) — the decisive gate.
+
+## 2026-06-09 — Node 2 Commissioned; Next-Node Runbook Locked In
+
+### Result
+
+Commissioned a second C6 LED node on the existing Stage B bench without any
+firmware rebuild:
+
+| Device | Port / role |
+| --- | --- |
+| S3+H2 board | `/dev/cu.usbmodem1301`; `thread_border_router_otcli`; Thread router; SRP/DNS-SD owner |
+| C6 controller | `/dev/cu.usbmodem4`; separate commissioner/resolver; fabric intact |
+| C6 LED node 2 | `/dev/cu.usbmodem1101`; commissioned as Matter node id `2` |
+
+The successful pairing command was the same dataset TLV from Stage B:
+
+```text
+matter esp controller pairing ble-thread 2 0e08000000000001000000030000154a0300001035060004001fffe00208a4722531cc1f59020708fd783f10c811bc78051056e95233105cc18d2419a9f1839e5364030f4f70656e5468726561642d643431610102d41a04108ab87ae955aa7c39249a334e01c5beea0c0402a0f7f8 20202021 3840
+```
+
+### What Actually Matters Next Time
+
+Do **not** re-debug commissioning from scratch when adding the next LED node.
+The failure mode was already known: long USB-Serial/JTAG console writes can be
+silently truncated. Use `sercap.py` or an equivalent paced writer; confirm the
+controller echo includes the final `20202021 3840` before trusting the attempt.
+Do not rebuild for `CONFIG_CONSOLE_MAX_COMMAND_LINE_LENGTH`; that was a red
+herring for this path.
+
+Known-good sequence for the next node:
+
+```text
+# BR: SRP is lost if the S3 monitor/open reset the BR.
+matter esp ot_cli srp server state
+matter esp ot_cli srp server enable      # if disabled/stopped
+matter esp ot_cli srp server state       # expect running
+matter esp ot_cli dataset active -x
+
+# Controller: reset immediately before BLE pairing.
+# Node: reset/new NVS node and confirm "commissioning window opened".
+
+# Controller: send through sercap.py/chunked writes, not one pyserial dump.
+matter esp controller pairing ble-thread <node-id-k> <dataset_tlvs> 20202021 3840
+
+# Verdict.
+matter esp ot_cli dns browse _matter._tcp.default.service.arpa
+lo-set-scene <node-id-k> 1 3 000000 10 60 <seq>
+```
+
+Successful node 2 evidence:
+
+- Node 2 logged Thread attach, detected the BR SRP server, advertised
+  `49F59A617842C60B-0000000000000002._matter._tcp`, established CASE, then
+  logged `Received CommissioningComplete`, `Commissioning completed successfully`,
+  and `lo_led_node: commissioning complete`.
+- Controller `dns browse _matter._tcp.default.service.arpa` returned node 2
+  (`49F59A617842C60B-0000000000000002`) alongside the controller record
+  (`...000000000001B669`). After node 1 was powered back up, the browse returned
+  node 1, node 2, and the controller.
+- Direct Fibonacci scene control worked for both nodes:
+
+  ```text
+  lo-set-scene 1 1 3 000000 10 60 31
+  lo-set-scene 2 1 3 000000 10 60 32
+  ```
+
+  `effect=3` is Fibonacci. `brightness=60` (about 24% of 255) is the runtime
+  power-shortage workaround that stopped the bench blink/recover cycle. Do not
+  confuse this with 70% brightness (`179`), which is too high for the workaround.
+
+### Open Caveat
+
+The helper command `lo-set-scene 0x0001 ...` logged as `invoke destination=0x1`,
+so on this bench it behaved like node id `1`, not a proven multicast groupcast.
+Use direct per-node commands for power-limited bench testing until the real group
+path is configured and verified via the Stage E group `--is-group-cmd` flow.

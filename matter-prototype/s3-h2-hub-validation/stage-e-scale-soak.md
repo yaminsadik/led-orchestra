@@ -44,6 +44,71 @@ heap
 Record min free heap + largest free block + flash headroom after each node so the
 **per-node cost** is explicit.
 
+### E.1.1 Known-good bench workflow for the next node
+
+Do **not** restart Stage B/C debugging from scratch when adding node `k`. The
+current working path is a runtime procedure, not a rebuild:
+
+1. Keep the S3+H2 BR alive and confirm it still owns SRP/DNS-SD:
+
+   ```text
+   matter esp ot_cli state                  # router/leader is OK
+   matter esp ot_cli srp server state       # must be running
+   matter esp ot_cli srp server enable      # rerun if disabled/stopped after S3 reset
+   matter esp ot_cli dataset active -x      # use this TLV for pairing
+   ```
+
+2. Reset the C6 controller immediately before each BLE pairing attempt. This
+   clears stale pairing locks, stale CASE sessions, and the flaky C6 single-radio
+   BLE/802.15.4 state.
+
+3. Reset the new LED node and confirm it logs `commissioning window opened`.
+
+4. Send the long pairing command with paced serial writes. Do **not** paste or
+   dump the whole line at once; the USB-Serial/JTAG console path silently
+   truncates long lines. Use `sercap.py` (16-byte chunks / 30 ms delay) or an
+   equivalent chunked writer, and confirm the controller echo contains the final
+   `20202021 3840` before trusting the attempt:
+
+   ```text
+   matter esp controller pairing ble-thread <node-id-k> <dataset_tlvs> 20202021 3840
+   ```
+
+   `CONFIG_CONSOLE_MAX_COMMAND_LINE_LENGTH` is the wrong layer for this symptom;
+   do not rebuild just to change it.
+
+5. Judge success by device evidence, not quiet controller logs:
+
+   ```text
+   # LED node log
+   Received CommissioningComplete
+   Commissioning completed successfully
+   lo_led_node: commissioning complete
+
+   # Controller
+   matter esp ot_cli dns browse _matter._tcp.default.service.arpa
+   # expect ...-0000000000000001, ...-0000000000000002, ...-<node-id-k>, etc.
+   ```
+
+   A transient `operational discovery failed: 32` during commissioning can be a
+   race if the node later appears in DNS-SD and direct CASE/`SetScene` works.
+
+6. Keep bench power under the adapter limit while scaling. For the Fibonacci
+   effect (`effect=3`), start low:
+
+   ```text
+   lo-set-scene <node-id-k> 1 3 000000 10 60 <seq>
+   ```
+
+   `brightness=60` is about 24% of full scale and was the proven runtime
+   workaround for the blink/recover power-limit cycle. `brightness=179` is 70%
+   and is **not** the same workaround. Ramp up only after the strips are stable.
+
+Today's two-node bench also showed `lo-set-scene 0x0001 ...` logging as
+`destination=0x1`, so use direct per-node `lo-set-scene` commands for the
+power-limit workaround unless the real group path in E.2 has been explicitly
+configured and verified with `--is-group-cmd`.
+
 ## E.2 Group `SetScene` (the scale gate)
 
 Once ≥ 2 nodes are commissioned, add them to a group and drive **one** group
