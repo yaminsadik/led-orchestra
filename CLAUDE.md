@@ -38,13 +38,16 @@ in order: [docs/architecture.md](docs/architecture.md),
   through the C6 BR (host + RCP) and an operational-CASE `SetScene` rendered,
   once the commissioner's Wi-Fi softAP was dropped to clear single-C6 three-radio
   (Wi-Fi + BLE + 802.15.4) contention. The **S3+H2 board removes that contention
-  by construction** (Wi-Fi/BLE on the S3, 802.15.4 on the H2). Next are the
-  **S3+H2 hub Stages A-F**: inventory/toolchain (A), S3+H2 BR-only baseline (B),
-  the co-located one-board hub gate (C), recovery (D), scale+soak (E), thin
-  ingress (F). Runbooks + committed config:
+  by construction** (Wi-Fi/BLE on the S3, 802.15.4 on the H2). On the S3+H2 hub,
+  **Stage A (host build, 2026-06-06) and Stage B (S3+H2 BR-only baseline,
+  2026-06-08) PASSED** — a *separate* C6 controller commissioned a C6 LED node,
+  resolved it through the S3+H2 BR, established CASE, and `SetScene` rendered
+  red/green/blue on a physical strip. **Next is Stage C** (the co-located
+  one-board hub gate — the decisive test), then recovery (D), scale+soak (E),
+  thin ingress (F). Runbooks + committed config:
   [matter-prototype/s3-h2-hub-validation/](matter-prototype/s3-h2-hub-validation/).
   See [docs/controller-topology-validation.md](docs/controller-topology-validation.md)
-  and the 2026-06-04 entry in
+  and the 2026-06-04 and 2026-06-08 entries in
   [docs/debugging-journal.md](docs/debugging-journal.md).
 
 ## Invariants (do not break)

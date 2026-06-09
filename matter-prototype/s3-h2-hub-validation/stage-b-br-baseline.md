@@ -81,8 +81,12 @@ commissioner/resolver, not its own BR:
 
 ```bash
 # C6 controller-node as the separate commissioner/resolver:
-idf.py -C ../controller-node -B ../controller-node/build \
-  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.local;../stage0-br-validation/sdkconfig.client.defaults" \
+REPO="$(cd ../.. && pwd)"
+S0="$REPO/matter-prototype/stage0-br-validation"
+rm -f "$S0/build/client/sdkconfig"   # force the overlay to reseed sdkconfig
+EXTRA_SDKCONFIG_DEFAULTS="$S0/sdkconfig.client.defaults" \
+idf.py -C "$REPO/matter-prototype/controller-node" -B "$S0/build/client" \
+  -D SDKCONFIG="$S0/build/client/sdkconfig" \
   set-target esp32c6 build flash -p <C6_CTRL_PORT>
 
 # C6 LED node (stock app), put into commissioning at boot:
@@ -90,7 +94,10 @@ idf.py -C ../led-node -B ../led-node/build set-target esp32c6 build flash -p <C6
 ```
 
 (The Stage 0 runbook documents this client overlay in detail:
-[`../stage0-br-validation/README.md`](../stage0-br-validation/README.md).)
+[`../stage0-br-validation/README.md`](../stage0-br-validation/README.md). Do
+not use `-D SDKCONFIG_DEFAULTS` for the controller: `controller-node` deliberately
+sets its own defaults, so the Stage 0 overlay must be layered with
+`EXTRA_SDKCONFIG_DEFAULTS`.)
 
 ## B.4 Join the BR mesh, commission, resolve, render
 
@@ -121,24 +128,135 @@ lo-set-scene <node-id> 1 1 ff0000 0 255
 `lo-set-scene` performs CASE + invokes the custom cluster; the LED must render
 solid red with **no `error 32`** (`CHIP_ERROR_TIMEOUT`).
 
+## Current bench status (2026-06-08)
+
+First Stage B flash to the S3 host on `/dev/cu.usbmodem1101` succeeded, but the
+BR did **not** reach the first gate (`rcp version`). Boot logs showed a spinel
+response timeout followed by a host-side RCP-update failure:
+
+```text
+OPENTHREAD: spinel UART interface initialization completed
+P-SpinelDrive-: Wait for response timeout
+OpenThread: Internal RCP Version: openthread-esp32/4c2820d377-005c5cefc; esp32h2; 2026-06-06 23:36:41 UTC
+RCP_UPDATE: Failed to connect to RCP
+RCP firmware not found in storage, will reboot to try next image
+```
+
+Treat this as **Stage B blocked**, not failed against the BR/DNS-SD gate yet. The
+H2 USB1 path now works: `esptool chip_id` reports ESP32-H2 rev v1.2, and direct
+`ot_rcp` flash succeeded at 115200 baud.
+
+Update 2026-06-07: a no-auto-update direct-RCP diagnostic was added and flashed
+to the S3 (`flash-br-direct /dev/cu.usbmodem101`) after direct-flashing the H2 and
+unplugging H2 USB1. The generated config had `CONFIG_AUTO_UPDATE_RCP` disabled,
+the app used no `rcp_fw` image, and the S3 still timed out twice and aborted in
+`ResetCoprocessor() at spinel_driver.cpp:160`. This proved the RCP-update SPIFFS
+sequence was not the only failing subpath at that physical state.
+
+Update 2026-06-08: the same `br-direct` image passed the spinel boundary with S3
+USB2 only. macOS exposed the S3 as `/dev/cu.usbmodem1101`; `chip_id` confirmed
+MAC `9c:13:9e:0a:46:88`. The monitor reached
+`Software reset co-processor successfully`, `OpenThread attached to netif`, and
+Matter server initialization. The live direct-flashed-H2 hardware path is usable,
+but the stock app shell did not register the BR OT CLI commands:
+`matter esp ot_cli rcp version`, `state`, and `srp server state` all returned
+`Error: 83886338`.
+
+Update 2026-06-08, later: Stage B now builds from
+[`thread_border_router_otcli/`](thread_border_router_otcli/), a local copy of the
+stock `thread_border_router` app shell with
+`esp_matter::console::otcli_register_commands()` registered before console init.
+`flash-br-direct /dev/cu.usbmodem1101` rebuilt, erased, flashed, and verified the
+image. Boot again reached `Software reset co-processor successfully` and
+`OpenThread attached to netif`. The Matter console now exposes the control path:
+
+```text
+matter esp help
+    ot_cli: Openthread cli commands. Usage: matter esp ot_cli <command>.
+
+matter esp ot_cli rcp version
+openthread-esp32/4c2820d377-005c5cefc; esp32h2; 2026-06-07 01:01:49 UTC
+
+matter esp ot_cli state
+disabled
+
+matter esp ot_cli srp server state
+disabled
+```
+
+This unblocked B.2 for the direct-flashed-H2 path. B.2 then passed:
+`dataset init new` / `dataset commit active` returned `Done`, `ifconfig up`
+raised the OpenThread netif, `thread start` elected the BR as `leader`, and
+`srp server enable` made `srp server state` return `running`.
+
+Dataset TLVs for the next C6 controller attach/commissioning step:
+
+```text
+0e08000000000001000000030000154a0300001035060004001fffe00208a4722531cc1f59020708fd783f10c811bc78051056e95233105cc18d2419a9f1839e5364030f4f70656e5468726561642d643431610102d41a04108ab87ae955aa7c39249a334e01c5beea0c0402a0f7f8
+```
+
+Update 2026-06-08: the C6 controller was reflashed with the Stage 0 client
+overlay through `EXTRA_SDKCONFIG_DEFAULTS` and
+`matter-prototype/stage0-br-validation/build/client/sdkconfig`. The generated
+config confirmed `CONFIG_OPENTHREAD_BORDER_ROUTER` unset,
+`CONFIG_LED_ORCHESTRA_OPERATOR_WIFI_MODE_DISABLED=y`, and
+`CONFIG_OPENTHREAD_NUM_MESSAGE_BUFFERS=128`.
+
+The controller joined the S3+H2 BR dataset and reached `router`. Fast DNS-SD
+triage passed: after re-enabling the S3 SRP server following a monitor-induced
+S3 reset, the C6 registered a throwaway SRP `probe` service and
+`dns browse _matter._tcp.default.service.arpa` returned both the probe and the
+controller's own `_matter._tcp` record. The `probe` service was removed; the
+controller remained registered and a later browse returned:
+
+```text
+49F59A617842C60B-000000000001B669
+    Port:5580, Priority:0, Weight:0, TTL:7175
+    Host:F6B47AAAFC8975AE.default.service.arpa.
+    HostAddress:fd78:3f10:c811:bc78:ad94:fe8:844b:8320 TTL:7175
+    TXT:[SII=32303030, SAI=32303030, SAT=34303030] TTL:7175
+```
+
+Next: continue B.4 with the C6 LED node commissioning, then run the real LED
+DNS browse + CASE/SetScene gate. The host-side `CONFIG_AUTO_UPDATE_RCP` path
+remains a separate unresolved subpath.
+
+Update 2026-06-08, later — **Stage B PASS (end-to-end)**. The C6 controller
+commissioned a C6 LED node over BLE→Thread (attempt 1 succeeded with a fresh
+controller reboot just before `pairing ble-thread`: PASE → `AddNOC` → Thread
+attach → SRP register → CASE → `CommissioningComplete`, LED logged
+`lo_led_node: commissioning complete`). `dns browse` on the controller resolved
+the LED **through the S3+H2 BR** (`49F59A617842C60B-0000000000000001`), CASE
+established in ~1 s after a clean controller reset, and `lo-set-scene`
+(`endpoint 1`, effect 1) rendered solid red/green/blue. Three gotchas are
+recorded in the [debugging journal](../../docs/debugging-journal.md)
+(2026-06-08 end-to-end entry): a **stale CASE session** silently swallows
+`SetScene` after a node reboot (fix: reset the controller); `lo-set-scene` **arg
+2 is the endpoint** (not a sequence); and the bench **WS2815 is wired RGB** while
+`led_strip` emits GRB (fix: swap R/G in the renderer, reflash without erasing
+NVS). The host-side `CONFIG_AUTO_UPDATE_RCP` path remains unresolved separately.
+
 ## Evidence (fill at the bench)
 
 ```text
-Date / operator:
-S3 BR firmware:  thread_border_router + sdkconfig.s3-br-host.defaults (esp32s3)
-RCP path used:   host-side AUTO_UPDATE_RCP | direct H2 flash
-rcp version:                                  (paste)
-BR state / srp server:  leader / running?     (paste)
-C6 controller attach state:                   (paste)
-dns browse result (paste the _matter._tcp record, or the error):
-CASE / SetScene:  rendered? color/observed:   no error 32? (y/n)
-OT bufferinfo (free / max-used):              (paste, watch for pool starvation)
+Date / operator:                            2026-06-08 / Codex + operator
+S3 BR firmware:  thread_border_router_otcli + sdkconfig.s3-br-direct-rcp.defaults (esp32s3)
+RCP path used:   direct H2 flash succeeded at 115200; no-auto br-direct diagnostic passed spinel init and OT CLI on 2026-06-08
+rcp version:     openthread-esp32/4c2820d377-005c5cefc; esp32h2; 2026-06-07 01:01:49 UTC
+BR state / srp server:                       leader/router (varies across reboots) / running
+C6 controller attach state:                   leader/router (varies across reboots; attached to the BR mesh)
+dns browse result (paste the _matter._tcp record, or the error): PASS; C6 browse via S3+H2 BR returned the LED 49F59A617842C60B-0000000000000001 (plus the controller's …-000000000001B669)
+CASE / SetScene:  rendered? color/observed:   PASS; solid red/green/blue rendered on the physical 12V WS2815 strip via operational CASE; correct after an R/G color-order swap (see notes); no error 32 on the render runs
+OT bufferinfo (free / max-used):              C6 126 / 8; S3 63 / 14
 S3 heap: free / min-free / largest-free-block:
-Pass/Fail vs gate:
-Notes:
+Pass/Fail vs gate:                            PASS — full Stage B gate met: rcp version OK; BR leader + srp running; the separate C6 controller resolves the LED's _matter._tcp through the S3+H2 BR; CASE + SetScene render on the physical LED; no Error 28/32
+Notes:                                        (1) commission the LED with a fresh controller reboot before each BLE pairing attempt (clean BLE stack; dodges single-radio BLE/802.15.4 contention on the C6). (2) After a node reboot, reset the controller to drop a stale operational CASE session, else SetScene is acked but silently never reaches the node. (3) lo-set-scene arg 2 is the ENDPOINT (=1), not a sequence. (4) Bench strip is a WS2815 wired RGB; led_strip only emits GRB, so the renderer swaps R/G — reflash with a plain `flash` (no NVS erase) to keep commissioning. After S3 monitor reset, re-run `srp server enable`. Auto-update BR path remains unresolved separately.
 ```
 
 ## Decision
+
+**Result 2026-06-08: PASS** — proceeding to Stage C (co-locate the controller
+onto the S3 BR host).
 
 - **PASS** → proceed to [`stage-c-onehub.md`](stage-c-onehub.md) (co-locate the
   controller onto the S3 BR host).

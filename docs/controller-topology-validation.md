@@ -107,7 +107,7 @@ approval.
 is understood; the example builds succeed on the pinned toolchain. Runbook:
 [`stage-a-inventory.md`](../matter-prototype/s3-h2-hub-validation/stage-a-inventory.md).
 
-### Stage B — S3+H2 As BR-Only Baseline (reuse the Stage 0 client)
+### Stage B — S3+H2 As BR-Only Baseline (reuse the Stage 0 client) — **PASSED 2026-06-08**
 
 Replace the hand-wired C6 BR-host + C6 RCP with the official S3+H2 board, while
 keeping the existing separate C6 `controller-node` (with the Stage 0
@@ -123,6 +123,16 @@ controller's `dns browse` returns the LED record **through the S3+H2 BR**; CASE
 succeeds; `SetScene` renders on the physical LED; **no Error 28, no Error 32.**
 Runbook:
 [`stage-b-br-baseline.md`](../matter-prototype/s3-h2-hub-validation/stage-b-br-baseline.md).
+
+**Result — PASSED 2026-06-08.** The separate C6 controller commissioned a C6 LED
+node over BLE→Thread, resolved it **through the S3+H2 BR** (`dns browse` →
+`49F59A617842C60B-0000000000000001`), established operational CASE, and
+`SetScene` rendered solid red/green/blue on a physical strip — no Error 28/32.
+Three bench gotchas (a stale operational CASE session needs a commissioner reset;
+`lo-set-scene` arg 2 is the **endpoint**; the bench WS2815 is wired RGB while
+`led_strip` emits GRB, needing an R/G swap) are recorded in the 2026-06-08
+end-to-end [`debugging-journal.md`](debugging-journal.md) entry. Next: **Stage C**
+(co-located one-board hub — the decisive gate).
 
 ### Stage C — Co-Located One-Board Hub Proof (decisive)
 
