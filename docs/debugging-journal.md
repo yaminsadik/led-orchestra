@@ -1128,3 +1128,93 @@ run. The next meaningful branch is either:
   S3, to test whether platform mDNS/backbone is required; or
 - fall back to the proven split topology checkpoint from commit
   `0057d4d` (`Checkpoint split-topology bench before Stage C`).
+
+## 2026-06-09 — Rolled Back To Split Topology; Node 3 Commissioned
+
+### Result
+
+After the Stage C offline one-board hub failure, the bench was restored to the
+known-good Stage B split topology and validated with a fresh C6 LED node.
+
+| Device | Port / role |
+| --- | --- |
+| S3+H2 board | `/dev/cu.usbmodem1301`; BR-only `thread_border_router_otcli`; Thread router; SRP server running |
+| C6 controller | `/dev/cu.usbmodem4`; separate commissioner/resolver; existing fabric and dataset intact |
+| Fresh C6 LED node | `/dev/cu.usbmodem1101`; erased, reflashed, commissioned as Matter node id `3` |
+
+### What Worked
+
+- Restored the S3+H2 board with:
+
+  ```bash
+  ./matter-prototype/s3-h2-hub-validation/build-s3-hub.sh flash-br-direct /dev/cu.usbmodem1301
+  ```
+
+- The H2 RCP remained healthy:
+
+  ```text
+  openthread-esp32/4c2820d377-005c5cefc; esp32h2; 2026-06-07 01:01:49 UTC
+  ```
+
+- The S3+H2 BR attached to the existing Stage B Thread partition as `router`;
+  `srp server state` was `running`.
+- The separate C6 controller was still the controller: `lo-set-scene` was
+  present, Thread state was `leader`, and its original Stage B dataset/fabric
+  were intact.
+- The fresh C6 LED was erased/reflashed, then commissioned as node id `3` using
+  the Stage B dataset TLV and a paced `sercap.py` write. The controller echo
+  included the final `20202021 3840`, proving the known long-line truncation bug
+  was avoided.
+- The LED logged `Received CommissioningComplete`,
+  `Commissioning completed successfully`, and `lo_led_node: commissioning
+  complete`.
+
+Controller DNS browse after commissioning returned the LED and controller
+operational records:
+
+```text
+DNS browse response for _matter._tcp.default.service.arpa.
+49F59A617842C60B-0000000000000003
+49F59A617842C60B-000000000001B669
+```
+
+Direct low-brightness Fibonacci control worked:
+
+```text
+lo-set-scene 3 1 3 000000 10 60 301
+```
+
+LED evidence:
+
+```text
+lo_renderer: scene seq=301 effect=3 rgb=0,0,0 speed=10 brightness=60 start=0
+```
+
+### Notes
+
+- The first BLE attempt after rollback failed at GATT discovery:
+  `GATT discovery failed; status:7`.
+- An immediate retry crashed/rebooted the C6 controller with a load access fault.
+  After the controller rebooted and came back as Thread `leader`, the same paced
+  commissioning command succeeded.
+- During commissioning, the controller first logged
+  `OperationalSessionSetup[1:0000000000000003]: operational discovery failed: 32`,
+  but this was a benign race in this split topology: the LED had joined Thread
+  and advertised SRP, then the retry established CASE and completed
+  commissioning.
+- Continue to use `brightness=60` for bench power-limited Fibonacci tests. It is
+  a runtime current workaround, not a firmware fix or a real power-supply fix.
+
+### Current Bench Meaning
+
+The split topology is the working fallback after Stage C:
+
+```text
+S3+H2 BR-only + separate C6 controller + C6 LED nodes
+```
+
+Do not restart this path by re-debugging BLE, passcode, Thread dataset, or
+console line length. The practical next-node sequence is still: ensure S3 SRP is
+running, reset the C6 controller before pairing, reset/erase the fresh LED, send
+`pairing ble-thread` in paced chunks, then verify with DNS browse and
+`lo-set-scene <node> 1 3 000000 10 60 <seq>`.

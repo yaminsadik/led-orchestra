@@ -134,7 +134,7 @@ Three bench gotchas (a stale operational CASE session needs a commissioner reset
 end-to-end [`debugging-journal.md`](debugging-journal.md) entry. Next: **Stage C**
 (co-located one-board hub — the decisive gate).
 
-### Stage C — Co-Located One-Board Hub Proof (decisive)
+### Stage C — Co-Located One-Board Hub Proof (decisive) — **OFFLINE FAIL 2026-06-09**
 
 Prove the S3 can host **both** the Thread BR host **and** the Matter
 commissioner/controller while the H2 is the RCP. Start from esp-matter's
@@ -158,6 +158,25 @@ node through **its own** BR path; CASE succeeds; the S3 sends `SetScene`; the
 physical LED renders. Capture heap, largest free block, flash usage, RCP health,
 Thread state, SRP/DNS-SD evidence, and serial logs. Runbook:
 [`stage-c-onehub.md`](../matter-prototype/s3-h2-hub-validation/stage-c-onehub.md).
+
+**Result — OFFLINE FAIL 2026-06-09.** The S3+H2 one-board hub formed Thread,
+the H2 RCP responded, SRP was running, and the C6 LED joined Thread and
+advertised its `_matter._tcp` service. The long commissioning command was sent
+with paced writes and echoed the final `20202021 3840`, so this was not the
+known USB-serial truncation failure. The gate failed at the co-located
+controller's operational discovery step:
+
+```text
+Commissioning complete for node ID 0x0000000000000001: Error CHIP:0x00000032
+```
+
+That fails the offline Stage C gate. The proven fallback is the Stage B split
+topology: S3+H2 BR-only plus a separate C6 controller. The fallback was restored
+and revalidated the same day with a fresh C6 LED commissioned as node `3`; DNS
+browse returned `...0003` and the controller, and
+`lo-set-scene 3 1 3 000000 10 60 301` reached the LED. Details are in
+[`debugging-journal.md`](debugging-journal.md) and
+[`checkpoints/2026-06-09-stage-b-split-known-good.md`](checkpoints/2026-06-09-stage-b-split-known-good.md).
 
 ### Stage D — Repeatability + Recovery
 
