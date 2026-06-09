@@ -143,16 +143,23 @@ python "$IDF_PATH/components/partition_table/parttool.py" \
 ## Evidence (fill at the bench)
 
 ```text
-Date / operator:
-S3 port: /dev/cu.________   H2 direct port (if any): /dev/cu.________ / none
-S3 chip_id / rev:
-flash_id (size):            PSRAM detected:
-RCP flashing path:          host-side AUTO_UPDATE_RCP  |  direct H2 USB
+Date / operator:            2026-06-06 / Codex + operator
+S3 port: /dev/cu.usbmodem101 when USB2/S3 connected
+H2 direct port (if any):    /dev/cu.usbmodem1101 when USB1/H2 connected
+S3 chip_id / rev:           ESP32-S3 rev v0.2, MAC 9c:13:9e:0a:46:88
+flash_id (size):            8 MB, vendor 0x20 / device 0x4017
+PSRAM detected:             2 MB embedded PSRAM, AP_3v3, quad mode
+H2 chip_id / rev:           ESP32-H2 rev v1.2, MAC 10:51:db:ff:fe:67:93:95
+RCP flashing path:          direct H2 USB proven at 115200; host-side update still blocked
 Partition table (factory size, rcp_fw size, free):
-First-boot RCP-update log (paste a few lines):
-F-A1 install.sh esp32s3 run? (y/n, by whom):
-S3 build sizes after F-A1 (br / hub, flash % free):
-Notes / button-jumper actions:
+First-boot RCP-update log (paste a few lines): spinel wait timeout; update failed
+F-A1 install.sh esp32s3 run? (y/n, by whom): already resolved before bench pass
+S3 build sizes after F-A1 (br / hub, flash % free): BR 0x1e23d0 (19%); hub 0x23bb10 (24%)
+Notes / button-jumper actions: official schematic exposes USB1=H2 and USB2=S3;
+  macOS may reuse/renumber /dev/cu.usbmodem* nodes between sessions, so verify
+  each side with esptool chip_id before flashing.
+  H2 direct flash via idf.py/esptool at 460800 dropped with "Device not
+  configured"; manual esptool erase/write at 115200 succeeded.
 ```
 
 ## Gate result
@@ -160,10 +167,11 @@ Notes / button-jumper actions:
 - [x] Hardware/toolchain matrix written ([`README.md`](README.md)).
 - [x] H2 example builds on the pinned toolchain.
 - [x] S3 examples build on the pinned toolchain (F-A1 resolved; BR + hub OK).
-- [ ] Flashing path + board identity confirmed at the bench (operator).
+- [x] Flashing path + board identity confirmed at the bench (S3 USB2 and H2 USB1
+      both identified; direct H2 flash works at 115200).
 
 Stage A is **met on the host side**: the pinned toolchain builds all three
 artifacts (H2 RCP, S3 BR, S3 hub) after the F-A1 toolchain install and the F-A2
-RCP-path fix. The remaining item is the **bench inventory** (USB-port→chip mapping,
-flash/PSRAM identity, partition table, RCP flashing path), which needs the
-hardware.
+RCP-path fix. The first bench pass confirms the S3 identity, flash, PSRAM, and
+the H2 USB1 direct-flash path. Host-side S3-to-H2 auto-update is still a Stage B
+subpath under test, not a Stage A blocker.

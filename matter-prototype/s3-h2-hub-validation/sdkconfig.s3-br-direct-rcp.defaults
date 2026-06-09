@@ -1,0 +1,14 @@
+# Stage B diagnostic overlay: S3 BR host talks to a directly flashed H2 RCP.
+#
+# This intentionally disables host-side RCP update. Use it only after
+# `flash-rcp <H2_PORT>` has programmed the H2, then unplug USB1/H2 and flash this
+# build to USB2/S3. The test isolates the live S3 UART <-> H2 spinel path from
+# esp_rcp_update reset/boot/update sequencing.
+
+CONFIG_AUTO_UPDATE_RCP=n
+
+# Keep the same Stage B bring-up posture and logs as the main BR overlay.
+CONFIG_OPENTHREAD_BR_AUTO_START=n
+CONFIG_OPENTHREAD_RADIO_SPINEL_UART=y
+CONFIG_OPENTHREAD_LOG_LEVEL_DYNAMIC=n
+CONFIG_OPENTHREAD_LOG_LEVEL_NOTE=y

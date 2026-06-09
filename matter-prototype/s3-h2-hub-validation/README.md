@@ -82,9 +82,12 @@ provisioned separately on hardware (see [`stage-c-onehub.md`](stage-c-onehub.md)
 | `thread_border_router` + `s3-br-host` overlay (Stage B BR) | esp32s3 | `build-br` | **OK** — `thread_border_router.bin` 0x1e23d0 (~1.88 MB), **19% free** in the 2368K app partition; `rcp_fw` bundled from `build/rcp-h2` |
 | `controller` + `s3-otbr-controller` overlay (Stage C hub) | esp32s3 | `build-hub` | **OK** — `controller.bin` 0x23bb10 (~2.29 MB), **24% free** in the 3072K app partition |
 
-All builds are out-of-tree under `build/` (gitignored) and layer this package's
-committed overlays onto the **stock** examples — the SDK is not patched (the
-board's pins already match the stock examples).
+All builds are out-of-tree under `build/` (gitignored). The SDK is not patched
+(the board's pins already match the stock examples). Stage B BR builds use
+[`thread_border_router_otcli/`](thread_border_router_otcli/) — a local copy of
+the stock `thread_border_router` app shell with
+`esp_matter::console::otcli_register_commands()` added before console init, so
+the running BR exposes `matter esp ot_cli ...`.
 
 > **Host-build only.** These confirm the pinned toolchain compiles + links the S3
 > firmware; they are not a hardware gate. The app-partition headroom (BR **19%**,
@@ -98,6 +101,7 @@ board's pins already match the stock examples).
 | File | Purpose |
 | --- | --- |
 | [`build-s3-hub.sh`](build-s3-hub.sh) | Build/flash helper: `build-rcp` (H2), `build-br` (S3 Stage B), `build-hub` (S3 Stage C), `flash-*`, `monitor`, `clean`. Sources both export scripts; out-of-tree builds. |
+| [`thread_border_router_otcli/`](thread_border_router_otcli/) | Local Stage B copy of Espressif's `thread_border_router` app shell; registers the Matter OT CLI bridge while reusing stock esp-matter/ESP-IDF components. |
 | `sdkconfig.s3-br-host.defaults` | Stage B overlay on `thread_border_router` (offline BR: `BR_AUTO_START=n`, UART RCP, NOTE logs). |
 | `sdkconfig.s3-otbr-controller.defaults` | Stage C overlay on the `controller` example's `sdkconfig.defaults.otbr` (8 MB flash, UART RCP, PSRAM quad, NOTE logs). |
 | `sdkconfig.controller-node.s3-otbr.defaults` | **Scaffold (not yet gated):** S3+OTBR overlay for our own `controller-node` app — the post-gate fold-in path. |
