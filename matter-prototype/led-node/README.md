@@ -23,7 +23,9 @@ segment and exposes the LED Orchestra custom cluster.
 - Matter on/off light endpoint with the LED Orchestra custom cluster attached.
 - Thread-oriented `sdkconfig.defaults`.
 - WS2812 renderer using ESP-IDF `led_strip`.
-- `SetScene` changes the render state for `off`, `solid`, and `rainbow`.
+- `SetScene` changes the render state for `off`, `solid`, `rainbow`, and
+  `fibonacci` (per-pixel R/G/B are consecutive Fibonacci numbers mod 256 down the
+  strip; scrolls with `speed`).
 - `SetNodeConfig` updates RAM config and cluster attributes. GPIO changes are
   rejected for now because the strip driver is initialized at boot.
 - `SyncClock` stores a controller-time offset for scheduled scenes.

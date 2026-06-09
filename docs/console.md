@@ -76,7 +76,9 @@ listen port `5580` (see `controller.init(...)` in `app_main.cpp`).
 
 Registered in `main/led_orchestra_console.cpp`. They send the custom cluster
 `0xFFF1FC00`. Destination is a Matter node id (unicast) or a group id; the
-all-nodes group is `0x0001`. Effect ids: `0` off, `1` solid, `2` rainbow.
+all-nodes group is `0x0001`. Effect ids: `0` off, `1` solid, `2` rainbow,
+`3` fibonacci (per-pixel R/G/B are consecutive Fibonacci numbers mod 256 down the
+strip; scrolls with `speed`, ignores the RGB fields).
 
 ```text
 lo-set-scene <node-id|group-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]

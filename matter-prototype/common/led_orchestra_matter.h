@@ -54,6 +54,10 @@ enum EffectId : uint8_t {
     kEffectOff = 0,
     kEffectSolid = 1,
     kEffectRainbow = 2,
+    // Per-pixel color whose R/G/B channels are consecutive Fibonacci numbers
+    // (mod 256) along the virtual strip; the sequence scrolls down the strip
+    // with speed. Append-only: never reorder or reuse effect ids.
+    kEffectFibonacci = 3,
 };
 
 } // namespace matter

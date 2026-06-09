@@ -141,6 +141,13 @@ Effect-management decision:
 - Program bundles are **declarative data** (playlists of `(effect_id, params,
   timing)` + schedules), not code. Runtime-uploaded scripts/plugins are out of
   scope.
+- **Open decision — declarative renderer/bundle format (do not lock in yet).**
+  Bundles will be authored/scheduled declaratively, but the concrete
+  serialization is **undecided**: candidates include JSON or YAML for authoring,
+  and a compact binary form on the Thread wire. We need to decide based on hub
+  footprint, human-authorability, schema/versioning, and parse cost on the LED
+  node before committing. Whatever is chosen, the on-wire `SetScene`/bundle
+  contract stays append-only (effect ids + cluster field tags never reorder).
 
 Acceptance criteria:
 

@@ -30,10 +30,13 @@ CONFIG_ENABLE_CHIP_SHELL=y
 
 CONFIG_LED_ORCHESTRA_NODE_ID=1
 CONFIG_LED_ORCHESTRA_LED_GPIO=2
-CONFIG_LED_ORCHESTRA_LED_COUNT=60
+# Bench strip budget. 300 is the Kconfig max; sized to light a full physical
+# strip (the ~150-LED WS2815 bench strip lit ~40% at the old 60-LED budget).
+# Set these to the exact physical LED count for tight rainbow spread + memory.
+CONFIG_LED_ORCHESTRA_LED_COUNT=300
 CONFIG_LED_ORCHESTRA_SEGMENT_START=0
-CONFIG_LED_ORCHESTRA_SEGMENT_LENGTH=60
-CONFIG_LED_ORCHESTRA_TOTAL_LEDS=60
+CONFIG_LED_ORCHESTRA_SEGMENT_LENGTH=300
+CONFIG_LED_ORCHESTRA_TOTAL_LEDS=300
 
 # LED node is the Matter OTA Requestor: it pulls signed/encrypted images from
 # the hub OTA Provider over the offline Thread fabric (the OTA phase). Keep the
