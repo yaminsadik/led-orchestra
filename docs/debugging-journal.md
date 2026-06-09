@@ -1069,3 +1069,62 @@ The helper command `lo-set-scene 0x0001 ...` logged as `invoke destination=0x1`,
 so on this bench it behaved like node id `1`, not a proven multicast groupcast.
 Use direct per-node commands for power-limited bench testing until the real group
 path is configured and verified via the Stage E group `--is-group-cmd` flow.
+
+## 2026-06-09 — Stage C One-Board S3+H2 Hub: Offline Discovery FAIL
+
+### Result
+
+Tested the hypothesis that the S3 on the S3+H2 board can be both the Matter
+controller/commissioner and the Thread BR host while the on-board H2 acts as
+RCP. The S3 hub formed Thread and the fresh C6 LED joined and registered SRP,
+but commissioning failed at the Matter operational discovery step:
+
+```text
+Commissioning complete for node ID 0x0000000000000001: Error CHIP:0x00000032
+pairing_command: Commissioning failure with node D6E25A2A3B685E7-1
+```
+
+### What Was Proven
+
+- S3<->H2 RCP link was healthy:
+  `openthread-esp32/4c2820d377-005c5cefc; esp32h2; 2026-06-07 01:01:49 UTC`.
+- S3 Thread stack reached `leader`; SRP server was `running`.
+- The long `pairing ble-thread` command was sent through `sercap.py` paced
+  writes and echoed the final `20202021 3840`, so this was **not** the known
+  serial truncation failure.
+- BLE/PASE, NOC provisioning, Thread network setup, and Thread enable all
+  progressed.
+- The LED attached to the S3 Thread network, started the SRP client, and
+  advertised:
+
+  ```text
+  0D6E25A2A3B685E7-0000000000000001._matter._tcp
+  ```
+
+- After the commissioning failure, the S3 SRP server still listed the LED
+  operational service with address
+  `fd41:fcb0:9eef:a2e2:fb0b:2638:a217:dab2`.
+
+### Failure
+
+The S3 controller's internal operational discovery retried three times and
+failed with `Error CHIP:0x00000032` each time. This reproduces the important
+co-located resolver problem in the S3+H2 stock controller+OTBR image: the SRP
+record can exist locally, but the co-located Matter controller still does not
+resolve/CASE the commissioned Thread node in the offline setup.
+
+`matter esp ot_cli dns browse _matter._tcp.default.service.arpa` returned
+`Error 35: InvalidCommand` in this hub image, so the direct OT CLI DNS browse
+probe is not available without a config change. The internal Matter discovery
+failure is still decisive.
+
+### Decision
+
+Stage C offline one-board hub gate: **FAIL**. Do not re-debug BLE, passcode,
+dataset, SRP enable, or USB-serial truncation first; those were ruled out in this
+run. The next meaningful branch is either:
+
+- try the Stage C diagnostic with a local Wi-Fi/backbone interface enabled on the
+  S3, to test whether platform mDNS/backbone is required; or
+- fall back to the proven split topology checkpoint from commit
+  `0057d4d` (`Checkpoint split-topology bench before Stage C`).

@@ -101,7 +101,7 @@ SetScene JSON field map (from
 `7:U64 scheduled_start_time_ms` (0 = apply now). The device console splits on
 whitespace and the JSON has none, so paste it as a single token (no quotes). Use
 `0xFFF1FC00` for the cluster id; if the parser rejects hex, use the decimal
-`4293914112`. The LED must render **solid red** with no `error 32`.
+`4294048768`. The LED must render **solid red** with no `error 32`.
 
 *If `invoke-cmd` cannot encode the custom cluster*, add
 `CONFIG_ESP_MATTER_CONTROLLER_CUSTOM_CLUSTER_ENABLE=y` to the overlay and rebuild
@@ -151,6 +151,80 @@ Post-render free heap / min-free / largest-free-block:
 Pass/Fail vs gate:
 Notes:
 ```
+
+## Bench Result — 2026-06-09
+
+Stage C was run with only the S3+H2 board and one freshly flashed C6 LED board
+connected to the laptop.
+
+```text
+S3+H2 hub: /dev/cu.usbmodem1301 (ESP32-S3 MAC 9c:13:9e:0a:46:88)
+C6 LED:   /dev/cu.usbmodem1101 (ESP32-C6 base MAC 58:e6:c5:1b:8b:54)
+```
+
+Firmware and build evidence:
+
+```text
+Hub firmware: stock esp-matter examples/controller + sdkconfig.defaults.otbr + sdkconfig.s3-otbr-controller.defaults
+Hub flash: controller.bin 0x23bb10, app partition 0x2ee000, 0xb24f0 free (~24%)
+LED firmware: led-node current build; flash erased before pairing
+LED flash: led_orchestra_matter_led_node.bin 0x1d4c20, app partition 0x1e0000, 0xb3e0 free (~2%)
+```
+
+BR bring-up succeeded:
+
+```text
+rcp version: openthread-esp32/4c2820d377-005c5cefc; esp32h2; 2026-06-07 01:01:49 UTC
+Thread state: leader
+SRP server state: running
+Thread dataset TLV:
+0e08000000000001000000030000154a0300001935060004001fffe00208a7b69b894bf579320708fd41fcb09eefa2e20510112ded646337d18b3f230265f82c1461030f4f70656e5468726561642d313438630102148c041055b56c120755d0d89559fe44208d205d0c0402a0f7f8
+```
+
+The long `pairing ble-thread` command was sent through `sercap.py` paced writes.
+The controller echo included the full tail `20202021 3840`, so this run did
+**not** hit the known USB-Serial/JTAG truncation failure.
+
+Commissioning progressed through BLE/PASE, NOC provisioning, Thread network
+setup, and Thread enable. The LED joined the S3 Thread network and registered
+SRP:
+
+```text
+LED: Role detached -> child
+LED: SRP Client was started, detected server: fd41:fcb0:9eef:a2e2:a29d:a49d:3fba:dfc9
+LED: advertising srp service: 0D6E25A2A3B685E7-0000000000000001._matter._tcp
+LED: Role child -> router
+```
+
+However, the S3 controller could not resolve its own commissioned node through
+the co-located discovery path:
+
+```text
+OperationalSessionSetup[1:0000000000000001]: operational discovery failed: 32
+OperationalSessionSetup[1:0000000000000001]: operational discovery failed: 32
+OperationalSessionSetup[1:0000000000000001]: operational discovery failed: 32
+Commissioning complete for node ID 0x0000000000000001: Error CHIP:0x00000032
+pairing_command: Commissioning failure with node D6E25A2A3B685E7-1
+```
+
+After the failure, the S3 SRP server still had the LED's operational record:
+
+```text
+0D6E25A2A3B685E7-0000000000000001._matter._tcp.default.service.arpa.
+    port: 5540
+    host: DE9EB5A552883659.default.service.arpa.
+    addresses: [fd41:fcb0:9eef:a2e2:fb0b:2638:a217:dab2]
+```
+
+The CLI probe `matter esp ot_cli dns browse _matter._tcp.default.service.arpa`
+returned `Error 35: InvalidCommand` in this hub image, so direct OT CLI DNS
+browse is not available without a config change. The internal Matter operational
+discovery failure is still decisive: SRP registration existed, but the S3
+controller did not resolve/CASE the node locally before the commissioning gate
+timed out.
+
+Pass/fail vs gate: **FAIL offline**. No `invoke-cmd SetScene` was attempted
+because commissioning never reached operational CASE or `CommissioningComplete`.
 
 ## Decision
 
