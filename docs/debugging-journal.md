@@ -1218,3 +1218,89 @@ console line length. The practical next-node sequence is still: ensure S3 SRP is
 running, reset the C6 controller before pairing, reset/erase the fresh LED, send
 `pairing ble-thread` in paced chunks, then verify with DNS browse and
 `lo-set-scene <node> 1 3 000000 10 60 <seq>`.
+
+## 2026-06-10 — Stage D Split: Offline BR Never Auto-Starts SRP (root cause + fix)
+
+### Result
+
+Ran Stage D (repeatability + recovery) on the split topology (S3+H2 BR-only +
+separate C6 controller + 2 C6 LED nodes 2/3), with heap instrumentation now
+live on the controller and LED apps (`lo_heap: free=… min_free=… largest=…`,
+every 10 s). **D.1 (drift) and D.2 (LED power-cycle + keep-last-valid) passed;
+D.3a (BR power-cycle) initially FAILED, root-caused to a backbone-gated SRP
+server, then fixed and validated.**
+
+### What Passed
+
+- **Heap smoke + D.1 drift:** controller `min_free=156564 largest=131072`; LEDs
+  `min_free≈218k largest≈192k` — all far above the gate floors (≥48 K / ≥24 K).
+  Over 16 alternating `lo-set-scene` invokes, `min_free` and `largest` were flat
+  on both controller and LED → **no drift, no fragmentation**.
+- **D.2 LED power-cycle:** node 2 was yanked/replugged; it rejoined Thread and
+  re-registered SRP **without re-commission**, the controller re-resolved it, and
+  control resumed within budget. **Keep-last-valid held** — node 3 kept rendering
+  green throughout (the only artifact was the known bench-power flicker past
+  ~20 LEDs, not a Matter/Thread issue). Note: the *first* invoke fired immediately
+  after rejoin can no-op on a not-yet-re-established CASE session; a retry a few
+  seconds later rendered in ~1 s. Production control must **retry the recovery
+  scene**, not fire once.
+
+### The D.3a Failure and Root Cause
+
+After an unclean S3 BR power-cycle, the RCP relinked and Thread re-attached
+(`router`), but:
+
+```text
+matter esp ot_cli srp server state   -> disabled
+matter esp ot_cli dns browse …       -> (empty)   # no node resolvable
+```
+
+Manually running `srp server enable` restored everything (state→running, all
+records back, render resumed; the LEDs had held last-valid). So the **only**
+broken thing was SRP auto-start.
+
+**Root cause:** in `thread_border_router_otcli/main/app_main.cpp`, the entire BR
+bring-up — `esp_openthread_border_router_init()`, which enables the SRP server /
+DNS-SD publishing — is called **only inside the `IP_EVENT_STA_GOT_IP` handler**.
+It runs only when the S3 joins Wi-Fi and gets an IP. The offline split has **no
+Wi-Fi backbone**, so `STA_GOT_IP` never fires, `border_router_init` never runs,
+and the SRP server is never enabled. This is the same Wi-Fi-backbone assumption
+that sank Stage C, resurfacing as a recovery failure.
+
+### The Fix
+
+Added `enable_srp_server_offline()` to the BR app: after `esp_matter::start()`,
+acquire the OT lock and call `otSrpServerSetEnabled(esp_openthread_get_instance(),
+true)` **unconditionally**, decoupled from the backbone. The controller resolves
+over Thread (it is a Thread node querying this SRP server directly — no backbone
+mDNS bridge needed), so enabling just the SRP server is sufficient offline. The
+call is idempotent, so a later `border_router_init` (if a backbone is ever added)
+re-enabling it is harmless.
+
+### Validation
+
+Built via `build-s3-hub.sh build-br-direct` and **app-flashed** (not
+`erase-flash`, to preserve the Thread dataset in NVS). On the reboot:
+
+```text
+app_main: SRP server auto-enabled (offline, backbone-independent)
+matter esp ot_cli srp server state   -> running     # no manual enable
+matter esp ot_cli dns browse …       -> nodes 2, 3, controller (1B669) all back
+```
+
+The app-flash reboot runs the same `app_main` boot path an unclean power-yank
+would, so D.3a is functionally fixed. (An explicit power-yank reconfirmation was
+deferred in favor of moving to multi-node testing; the boot path is identical.)
+
+### Bench Map (this session)
+
+```text
+/dev/cu.usbmodem11301  ESP32-S3  S3+H2 BR (MAC 9c:13:9e:0a:46:88)
+/dev/cu.usbmodem11101  ESP32-C6  controller (node 0x1B669=112233)
+/dev/cu.usbmodem101    ESP32-C6  LED node 2 (MAC …1b:6d:fc)
+/dev/cu.usbmodem11201  ESP32-C6  LED node 3 (MAC …1b:8b:54)
+```
+
+USB ports renumber on every reconnect/reset — always re-map before flashing.
+Driving the console from a host script works for short lines; long
+`pairing ble-thread` still needs paced writes.

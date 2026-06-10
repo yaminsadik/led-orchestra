@@ -9,9 +9,12 @@
 #include <esp_err.h>
 #include <esp_log.h>
 #include <nvs_flash.h>
+#include <esp_openthread.h>
 #include <esp_openthread_lock.h>
 #include <esp_openthread_border_router.h>
 #include <esp_spiffs.h>
+
+#include <openthread/srp_server.h>
 
 #include <esp_matter.h>
 #include <esp_matter_console.h>
@@ -58,6 +61,27 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
     default:
         break;
     }
+}
+
+// Offline SRP-server auto-enable. The stock BR only enables the SRP server inside
+// the IP_EVENT_STA_GOT_IP path (via esp_openthread_border_router_init), so an
+// offline hub with no Wi-Fi backbone never starts the SRP server and operational
+// discovery breaks after every boot/power-cycle (Stage D D.3a). We resolve over
+// Thread (the controller is a Thread node querying this SRP server directly, not
+// via a backbone mDNS bridge), so enable the SRP server unconditionally once the
+// OpenThread instance exists. otSrpServerSetEnabled is idempotent and the server
+// transitions disabled->stopped->running as Thread network data becomes available.
+static void enable_srp_server_offline(void)
+{
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    otInstance *instance = esp_openthread_get_instance();
+    if (instance != NULL) {
+        otSrpServerSetEnabled(instance, true);
+        ESP_LOGI(TAG, "SRP server auto-enabled (offline, backbone-independent)");
+    } else {
+        ESP_LOGE(TAG, "SRP server auto-enable skipped: no OpenThread instance");
+    }
+    esp_openthread_lock_release();
 }
 
 extern "C" void app_main()
@@ -121,4 +145,9 @@ extern "C" void app_main()
     esp_matter::console::otcli_register_commands();
     esp_matter::console::init();
 #endif // CONFIG_ENABLE_CHIP_SHELL
+
+    /* Offline hubs have no Wi-Fi backbone to trigger border_router_init, so start
+       the SRP server here. With a backbone, border_router_init re-enabling it is
+       harmless (idempotent). */
+    enable_srp_server_offline();
 }
