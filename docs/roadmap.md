@@ -106,7 +106,13 @@ C6/H2 esp-thread-br path itself not stable -> Pi / ot-br-posix
 
 ## Phase 5: Multi-Node Offline Thread Mesh
 
-Status: planned.
+Status: **firmware landed on the split topology; hardware gate pending.** Real
+Matter group control is implemented — `lo-add-group` (Groups cluster AddGroup),
+`lo-set-scene-group` / `lo-sync-clock-group` / `lo-scheduled-scene-group` (group
+ids encoded with `chip::NodeIdFromGroupId`), plus `lo-show-group-help` for the
+one-time group-key sequence. Both ESP32-C6 apps build. **Not** done until
+hardware confirms every node renders from one group command (the node-side group
+key install via Group Key Management `0x003F` is the step to verify).
 
 Goal: control multiple LED nodes through the hub over Thread, with no venue
 Wi-Fi/router/internet requirement.
@@ -124,7 +130,16 @@ Acceptance criteria:
 
 ## Phase 6: Segment Config, Synchronized Effects, And Program Bundles
 
-Status: planned.
+Status: **core firmware landed; hardware gate + bundle transport pending.**
+Durable NVS `NodeConfig` (versioned, CRC, load-and-log at boot), scheduled
+`SetScene` with keep-last-valid promotion at the synchronized start time, the
+`lo-scheduled-scene-group` convenience command, and the FastLED-shaped
+effect/color engine + append-only effect metadata registry are implemented and
+build. The declarative bundle *format* and on-Thread transport remain open by
+design (see the effect-management decision below and `architecture.md`); the code
+boundaries (commands append-only, bundles-are-data, distribute-then-activate) are
+in place. Not gated until multi-node hardware confirms synchronized scheduled
+group activation.
 
 Goal: make the hub the source of truth for node config, effect timing, and the
 distribution of declarative program bundles.
@@ -163,7 +178,20 @@ Acceptance criteria:
 
 ## Phase 7: Offline OTA
 
-Status: planned.
+Status: **requestor present; provider scaffold landed (build-gated); offline
+image plumbing + field-security pending.** LED nodes are Matter OTA Requestors
+(`CONFIG_ENABLE_OTA_REQUESTOR=y`, requestor cluster auto-created, `ota_0`/`ota_1`/
+`otadata` partitions present; builds). The controller has an OTA Provider cluster
++ `lo-ota-*` operator commands behind `CONFIG_LED_ORCHESTRA_ENABLE_OTA_PROVIDER`
+(off by default). **Remaining for functional offline OTA:** the stock provider
+sources candidates from DCL and fetches image bytes over HTTP, so a hub-local
+image endpoint (or a flash-backed provider extension) is needed to keep it
+offline; details in
+[`../matter-prototype/s3-h2-hub-validation/phase-7-offline-ota.md`](../matter-prototype/s3-h2-hub-validation/phase-7-offline-ota.md).
+OTA is **functional** only after a real LED node downloads and applies an image
+over Matter/Thread. **Field-ready** OTA additionally needs secure boot, flash
+encryption, signed/encrypted images, key handling, and rollback/recovery tests —
+a separate security layer from fabric credentials.
 
 Goal: update commissioned LED nodes over the offline Matter/Thread fabric (no
 node-side USB cable, no internet).

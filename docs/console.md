@@ -83,20 +83,114 @@ overlapping color waves with a breathing intensity curve; scrolls with `speed`,
 ignores the RGB fields).
 
 ```text
-lo-set-scene <node-id|group-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]
+lo-set-scene <node-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]
 lo-set-node-config <node-id> <endpoint-id> <orchestra-node-id> <segment-start> <segment-len> <total-leds> <led-gpio>
-lo-sync-clock <node-id|group-id> <endpoint-id> [controller-time-ms]
+lo-sync-clock <node-id> <endpoint-id> [controller-time-ms]
 ```
 
-- `lo-set-scene` — set effect, RGB (6 hex digits), speed, brightness. `sequence`
-  auto-increments if omitted; `scheduled-start-ms` of `0` applies immediately.
+- `lo-set-scene` — **unicast** to one node. Set effect, RGB (6 hex digits),
+  speed, brightness. `sequence` auto-increments if omitted; `scheduled-start-ms`
+  of `0` applies immediately, otherwise the node holds its current scene and
+  switches at the synchronized start time (keep-last-valid; it does not blank
+  while waiting). For a whole group use `lo-set-scene-group` (below) — a bare
+  small id like `0x0001` here means **unicast node 1**, not a group.
 - `lo-set-node-config` — provision a node's segment layout and LED GPIO. Unicast
-  only (do not send to a group).
+  only (do not send to a group). The node persists this in NVS and reloads it at
+  boot (`config loaded from NVS ...` / `config persisted ...` in the node log);
+  a runtime GPIO change is still rejected because the strip driver is bound at
+  boot.
 - `lo-sync-clock` — push the controller clock; defaults to the controller's
   current uptime in ms if `controller-time-ms` is omitted.
 
 The full field/tag contract lives in
 `matter-prototype/cluster/led-orchestra.md`.
+
+## Group Control
+
+Real Matter group control. A group is **not** a small id on the wire: an
+application group id `g` (`0x0001..0xFEFF`) is addressed as a NodeId in the range
+`0xFFFFFFFFFFFF0000..FFFF`, encoded with `chip::NodeIdFromGroupId(g)`. The group
+commands below do that encoding so the SDK dispatches a real groupcast; passing a
+bare `0x0001` to a *unicast* command would instead target node 1. The all-nodes
+group is `0x0001`.
+
+```text
+lo-add-group <node-id> <endpoint-id> [group-id] [group-name]
+lo-set-scene-group <group-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]
+lo-sync-clock-group <group-id> [controller-time-ms]
+lo-scheduled-scene-group <group-id> <delay-ms> <effect-id> <rrggbb> <speed> <brightness> [sequence]
+lo-show-group-help
+```
+
+- `lo-add-group` — enroll one node endpoint into a group via the standard Groups
+  cluster (`0x0004`) AddGroup command (unicast, per node). `group-id` defaults to
+  `0x0001`, `group-name` to `orchestra`. Membership is what makes a later
+  groupcast reach that endpoint.
+- `lo-set-scene-group` — groupcast `SetScene` to every enrolled node.
+- `lo-sync-clock-group` — groupcast `SyncClock`; defaults to controller uptime.
+- `lo-scheduled-scene-group` — compute `controller_uptime + delay` and groupcast
+  a scheduled `SetScene`, so all segments flip together at one synchronized time.
+  Pair it with a recent `lo-sync-clock-group` so every node's offset is aligned.
+- `lo-show-group-help` — print the one-time group-enablement sequence below.
+
+### One-time group key + enrollment setup
+
+Matter groupcast is encrypted with a group key. Both the controller **and** each
+node need that key, and each node endpoint needs to be a group member. Run once:
+
+1. Controller-side group keyset (esp-matter built-ins, already registered by
+   `controller_register_commands()`):
+
+   ```text
+   matter esp controller group-settings add-keyset 0x0042 0 0xFFFFFFFFFFFFFFFF <32-hex-epoch-key>
+   matter esp controller group-settings bind-keyset 0x0001 0x0042
+   matter esp controller group-settings add-group   0x0001 orchestra
+   ```
+
+   `0x0042` is the keyset id, `0` is the TrustFirst policy, the 16-byte epoch key
+   is 32 hex chars (dev/test value only — production rotates real keys through
+   the Kubernetes control plane). `0x0001` is the application group id.
+
+2. Per node (after commissioning) — install the same key + group→keyset map on
+   the node via the **Group Key Management** cluster (`0x003F`), then enroll the
+   endpoint:
+
+   ```text
+   matter esp controller invoke-cmd <node> 0 0x003F 0x00 "<KeySetWrite GroupKeySetStruct>"
+   matter esp controller write-attr <node> 0 0x003F 0x00 "[{<GroupKeyMapStruct>}]"
+   lo-add-group <node> 1 0x0001 orchestra
+   ```
+
+   The KeySetWrite payload is the `GroupKeySetStruct` (keyset id `0x0042`, policy,
+   epoch key 0 = the same 16-byte key, epoch start time). The GroupKeyMap entry
+   maps group `0x0001` → keyset `0x0042`. **This node-side key install is the step
+   to confirm on hardware** — until every node holds the group key, a groupcast
+   `lo-set-scene-group` will not be accepted by the nodes (each node keeps its
+   last valid scene). Use direct per-node `lo-set-scene` until the group path is
+   verified end to end.
+
+3. Drive all nodes with one command: `lo-set-scene-group 0x0001 ...`.
+
+## OTA Provider Commands (Phase 7, build-gated)
+
+These are registered **only** when the controller is built with
+`CONFIG_LED_ORCHESTRA_ENABLE_OTA_PROVIDER=y` (off by default; see the Phase 7
+runbook). They drive the local Matter OTA Provider.
+
+```text
+lo-ota-status
+lo-ota-enable <node-id> [once]
+lo-ota-disable <node-id>
+lo-ota-set-image <uri-or-path> <software-version> <version-string> <size>
+```
+
+- `lo-ota-status` — show provider state + the recorded local image candidate.
+- `lo-ota-enable` / `lo-ota-disable` — allow/deny a specific node's OTA (default
+  is DENY; a node must have sent a QueryImage once for an enable to take effect).
+- `lo-ota-set-image` — record the local image the hub intends to serve. Serving
+  the bytes needs a hub-local image endpoint (the stock provider fetches over
+  HTTP from the candidate URL) — see the Phase 7 runbook for the remaining
+  offline plumbing. Offline-first: never a DCL/internet URL in the product path.
 
 ## Typical Bring-up Flow
 

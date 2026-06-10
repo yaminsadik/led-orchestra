@@ -37,10 +37,25 @@ required to render scenes.
 - Controller-local Wi-Fi ingress config: private AP by default, station mode as
   an explicit build-time option.
 - Thread-oriented `sdkconfig.defaults`.
-- USB shell helpers for the custom cluster:
-  - `lo-set-scene <node-id|group-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]`
+- USB shell helpers for the custom cluster (unicast):
+  - `lo-set-scene <node-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]`
   - `lo-set-node-config <node-id> <endpoint-id> <orchestra-node-id> <segment-start> <segment-len> <total-leds> <led-gpio>`
-  - `lo-sync-clock <node-id|group-id> <endpoint-id> [controller-time-ms]`
+  - `lo-sync-clock <node-id> <endpoint-id> [controller-time-ms]`
+- **Real group control** (encodes group ids with `chip::NodeIdFromGroupId`):
+  - `lo-add-group <node-id> <endpoint-id> [group-id] [group-name]` (Groups cluster AddGroup)
+  - `lo-set-scene-group <group-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]`
+  - `lo-sync-clock-group <group-id> [controller-time-ms]`
+  - `lo-scheduled-scene-group <group-id> <delay-ms> <effect-id> <rrggbb> <speed> <brightness> [sequence]`
+  - `lo-show-group-help` — prints the one-time group key + enrollment sequence
+  - Group keysets use the built-in `controller group-settings add-keyset/bind-keyset/add-group`.
+    The node-side group-key install is the hardware-gated step (see
+    [`docs/console.md`](../../docs/console.md#one-time-group-key--enrollment-setup)).
+- **Offline OTA Provider scaffold (build-gated, `CONFIG_LED_ORCHESTRA_ENABLE_OTA_PROVIDER`,
+  default off):** OTA Provider cluster on the root endpoint + `lo-ota-status`,
+  `lo-ota-enable`, `lo-ota-disable`, `lo-ota-set-image`. Enabling it needs the
+  Matter server + the `esp_matter_ota_provider` component with DCL disabled and a
+  hub-local image endpoint — see the Phase 7 runbook
+  [`../s3-h2-hub-validation/phase-7-offline-ota.md`](../s3-h2-hub-validation/phase-7-offline-ota.md).
 - **Staged (not yet gated):** an S3+OTBR build path for this app — a committed
   `sdkconfig.controller-node.s3-otbr.defaults` overlay and a UART-RCP variant of
   `main/esp_ot_config.h` — lives in

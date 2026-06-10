@@ -9,7 +9,40 @@ namespace matter {
 // Replace the vendor id before any production or certified build.
 static constexpr uint32_t kClusterId = 0xFFF1FC00;
 static constexpr uint16_t kEndpointIdHint = 1;
+
+// Default "all LED nodes" application group. An application group id is a plain
+// 16-bit id (0x0001..0xFEFF); it is encoded into a Matter group NodeId with
+// chip::NodeIdFromGroupId(group) (= 0xFFFFFFFFFFFF0000 | group) before a
+// groupcast invoke. Group `0x0001` is the conventional all-nodes group for the
+// orchestra. Group ids are an append-only namespace: never reuse a retired one.
 static constexpr uint16_t kGroupAllNodes = 0x0001;
+
+// Standard Matter Groups cluster (0x0004), used unicast on each LED endpoint to
+// enroll that endpoint into an application group. Once an endpoint is a group
+// member, a groupcast invoke of the LED Orchestra custom cluster reaches it.
+// These are SDK/spec ids, restated here so the controller console does not pull
+// the full zap-generated cluster objects.
+namespace groups_cluster {
+static constexpr uint32_t kClusterId = 0x00000004;
+static constexpr uint32_t kCommandAddGroup = 0x00000000;     // AddGroup(group_id, group_name)
+static constexpr uint32_t kCommandRemoveGroup = 0x00000003;  // RemoveGroup(group_id)
+namespace add_group_tag {
+static constexpr uint8_t kGroupId = 0;
+static constexpr uint8_t kGroupName = 1;
+} // namespace add_group_tag
+} // namespace groups_cluster
+
+// Group key material defaults for the development fabric. The controller must
+// install a group keyset and bind it to the application group before groupcast
+// custom-cluster commands are accepted by member nodes (see
+// `lo-show-group-help` and docs/console.md). These are dev/test values only;
+// production rotates real epoch keys through the Kubernetes control plane.
+namespace group_key {
+static constexpr uint16_t kDefaultKeysetId = 0x0042;
+// Key policy 0 = TrustFirst (CacheAndSync requires synced time). 16-byte epoch
+// key as a 32-char hex octet string for `controller group-settings add-keyset`.
+static constexpr uint8_t kDefaultKeyPolicy = 0;
+} // namespace group_key
 
 namespace attribute {
 static constexpr uint32_t kCurrentScene = 0x00000000;

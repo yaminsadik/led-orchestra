@@ -63,10 +63,18 @@ Fields:
 
 Behavior:
 
-- The prototype stores config in RAM and reports it through attributes.
-- A later phase persists config in the node's nonvolatile storage.
-- Log the loaded config at boot.
-- Use unicast, not group command, for provisioning.
+- The node **persists** accepted config in NVS (magic + version + CRC wrapped)
+  and reloads it at boot before the renderer/attributes rely on it. The boot log
+  records the source: `config loaded from NVS ...` vs `... from defaults ...`. A
+  corrupt/incompatible/missing record falls back to the compiled Kconfig defaults
+  (it never blanks node identity). The storage record is versioned and
+  append-only: bump the version and add a migration branch rather than reordering
+  fields.
+- A persistence failure does not fail the command — the live render state is
+  already updated (keep-last-valid) and the hub can re-provision next boot.
+- A runtime `led_gpio` change is still rejected: the strip driver is bound at
+  boot, so a GPIO move needs a reboot/re-init.
+- Use unicast, not a group command, for provisioning.
 
 ### SyncClock
 
@@ -95,18 +103,51 @@ Behavior:
 
 ## Controller Console Helpers
 
-The controller-node prototype registers these USB shell commands:
+The controller-node registers these USB shell commands (unicast):
 
 ```text
-lo-set-scene <node-id|group-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]
+lo-set-scene <node-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]
 lo-set-node-config <node-id> <endpoint-id> <orchestra-node-id> <segment-start> <segment-len> <total-leds> <led-gpio>
-lo-sync-clock <node-id|group-id> <endpoint-id> [controller-time-ms]
+lo-sync-clock <node-id> <endpoint-id> [controller-time-ms]
 ```
+
+and these group commands (see the [Group Commands](#group-commands) contract):
+
+```text
+lo-add-group <node-id> <endpoint-id> [group-id] [group-name]
+lo-set-scene-group <group-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]
+lo-sync-clock-group <group-id> [controller-time-ms]
+lo-scheduled-scene-group <group-id> <delay-ms> <effect-id> <rrggbb> <speed> <brightness> [sequence]
+lo-show-group-help
+```
+
+Full operator reference: [`../../docs/console.md`](../../docs/console.md).
 
 ## Group Commands
 
-Use Matter group/multicast for `SetScene` once at least two LED nodes are
-commissioned. Keep `SetNodeConfig` unicast-only.
+All-node `SetScene`/`SyncClock` activation uses real Matter groupcast once at
+least two LED nodes are commissioned. Keep `SetNodeConfig` unicast-only.
+
+Wire encoding (load-bearing): an application **group id** `g` (`0x0001..0xFEFF`,
+all-nodes group `0x0001`) is **not** sent as a small id. It is addressed as a
+group NodeId `chip::NodeIdFromGroupId(g)` = `0xFFFFFFFFFFFF0000 | g`, which is
+what makes `send_invoke_cluster_command` dispatch a groupcast
+(`chip::IsGroupId(dest)` true). The `lo-*-group` commands do this encoding; a bare
+`0x0001` on a unicast command targets node 1 instead — that is the trap they
+avoid.
+
+Enrollment uses the **standard Groups cluster** (not part of this custom
+cluster):
+
+- Cluster id `0x0004`, command `0` `AddGroup{ "0:U16": group_id, "1:STR": name }`
+  sent unicast to each LED endpoint (the on/off-light endpoint already hosts a
+  Groups server). `lo-add-group` wraps this.
+- Group **keys** are required for groupcast to be accepted: the controller installs
+  a keyset (`controller group-settings add-keyset/bind-keyset/add-group`) and each
+  node gets the same key + a group→keyset map via the Group Key Management cluster
+  (`0x003F` KeySetWrite + GroupKeyMap). The node-side key install is the
+  hardware-gated step; see [`../../docs/console.md`](../../docs/console.md#one-time-group-key--enrollment-setup).
+  Do not claim group control works until every node renders one group `SetScene`.
 
 ## Program Bundles (Direction)
 

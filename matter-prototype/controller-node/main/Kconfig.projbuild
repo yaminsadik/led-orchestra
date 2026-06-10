@@ -97,4 +97,21 @@ menu "LED Orchestra Controller"
         depends on LED_ORCHESTRA_OPERATOR_WIFI_MODE_STA
         default ""
 
+    config LED_ORCHESTRA_ENABLE_OTA_PROVIDER
+        bool "Host the offline Matter OTA Provider on this hub (Phase 7)"
+        default n
+        help
+            Build the hub as the local Matter OTA Provider: a node + root
+            endpoint hosting the OTA Provider cluster (0x0029) plus the
+            `lo-ota-*` operator commands. OFF by default so the proven
+            commissioner build is unchanged.
+
+            Enabling this also requires (see the Phase 7 runbook):
+              * CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER=y so the controller hosts
+                a data model the requestors can invoke;
+              * the esp_matter_ota_provider component with DCL fetch DISABLED
+                (offline-first; no internet/cloud in the product path);
+              * a hub-local image endpoint for the BDX/HTTP image bytes.
+            LED nodes are OTA Requestors already (CONFIG_ENABLE_OTA_REQUESTOR=y).
+
 endmenu

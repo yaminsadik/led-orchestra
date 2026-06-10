@@ -121,6 +121,14 @@ and [`../stage0-br-validation/tools/sercap.py`](../stage0-br-validation/tools/se
 | **E** | [`stage-e-scale-soak.md`](stage-e-scale-soak.md) | Group `SetScene` to ~20 nodes; 72 h soak within the metric targets |
 | **F** | [`stage-f-ingress.md`](stage-f-ingress.md) | Thin K8s/USB/Wi-Fi ingress added; all Stage D/E metrics still pass |
 
+Application-firmware runbooks (run on the **split topology**, independent of the
+one-board hub gate):
+
+| Runbook | Purpose |
+| --- | --- |
+| [`phase-5-6-7-bench-runbook.md`](phase-5-6-7-bench-runbook.md) | Bench walkthrough: commission 3→20 nodes, verify real **group control**, durable NVS config, and synchronized **scheduled group** scenes. |
+| [`phase-7-offline-ota.md`](phase-7-offline-ota.md) | Offline Matter OTA: requestor (present) + provider scaffold (build-gated), the remaining offline image plumbing, and the field-security layer. |
+
 ## Working split (until the board is proven)
 
 The host author prepares docs, runbooks, committed overlays/scripts, and verifies

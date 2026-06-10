@@ -11,6 +11,9 @@
 #include <led_strip.h>
 #include <sdkconfig.h>
 
+#include "led_color.h"
+#include "led_orchestra_config_store.h"
+#include "led_orchestra_effects.h"
 #include "led_orchestra_matter.h"
 
 namespace {
@@ -18,16 +21,15 @@ namespace {
 static const char *TAG = "lo_renderer";
 static constexpr TickType_t kFrameDelay = pdMS_TO_TICKS(16);
 
-struct Rgb {
-    uint8_t r;
-    uint8_t g;
-    uint8_t b;
-};
-
 portMUX_TYPE g_lock = portMUX_INITIALIZER_UNLOCKED;
 led_strip_handle_t g_strip = nullptr;
 TaskHandle_t g_task = nullptr;
 int64_t g_clock_offset_ms = 0;
+
+// Engine output policy (color correction / temperature / master brightness /
+// power-budget hook). Defaults are identity-ish so the proven bench visuals are
+// unchanged; this is the seam where per-node correction and power policy attach.
+lo::OutputPolicy g_output_policy;
 
 LedOrchestraScene g_scene = {
     .effect = led_orchestra::matter::kEffectRainbow,
@@ -40,6 +42,13 @@ LedOrchestraScene g_scene = {
     .scheduled_start_ms = 0,
 };
 
+// A scheduled scene waits here until its synchronized start time, then the
+// render task promotes it to g_scene. Until promotion the node keeps rendering
+// the active g_scene (keep-last-valid: a scheduled change never blanks a running
+// show). This is the per-node side of distribute-then-activate.
+LedOrchestraScene g_pending = {};
+bool g_has_pending = false;
+
 LedOrchestraNodeConfig g_node = {
     .node_id = CONFIG_LED_ORCHESTRA_NODE_ID,
     .segment_start = CONFIG_LED_ORCHESTRA_SEGMENT_START,
@@ -47,136 +56,6 @@ LedOrchestraNodeConfig g_node = {
     .total_leds = CONFIG_LED_ORCHESTRA_TOTAL_LEDS,
     .led_gpio = CONFIG_LED_ORCHESTRA_LED_GPIO,
 };
-
-Rgb scale(Rgb color, uint8_t brightness)
-{
-    return {
-        .r = static_cast<uint8_t>((static_cast<uint16_t>(color.r) * brightness) / 255),
-        .g = static_cast<uint8_t>((static_cast<uint16_t>(color.g) * brightness) / 255),
-        .b = static_cast<uint8_t>((static_cast<uint16_t>(color.b) * brightness) / 255),
-    };
-}
-
-Rgb hsv_to_rgb(uint8_t h, uint8_t s, uint8_t v)
-{
-    if (s == 0) {
-        return {.r = v, .g = v, .b = v};
-    }
-
-    uint8_t region = h / 43;
-    uint8_t remainder = (h - (region * 43)) * 6;
-    uint8_t p = static_cast<uint8_t>((static_cast<uint16_t>(v) * (255 - s)) / 255);
-    uint8_t q = static_cast<uint8_t>((static_cast<uint16_t>(v) * (255 - ((static_cast<uint16_t>(s) * remainder) / 255))) / 255);
-    uint8_t t = static_cast<uint8_t>((static_cast<uint16_t>(v) * (255 - ((static_cast<uint16_t>(s) * (255 - remainder)) / 255))) / 255);
-
-    switch (region) {
-    case 0:
-        return {.r = v, .g = t, .b = p};
-    case 1:
-        return {.r = q, .g = v, .b = p};
-    case 2:
-        return {.r = p, .g = v, .b = t};
-    case 3:
-        return {.r = p, .g = q, .b = v};
-    case 4:
-        return {.r = t, .g = p, .b = v};
-    default:
-        return {.r = v, .g = p, .b = q};
-    }
-}
-
-uint8_t triangle8(uint8_t phase)
-{
-    return phase < 128 ? static_cast<uint8_t>(phase * 2) : static_cast<uint8_t>((255 - phase) * 2);
-}
-
-uint8_t modulate(uint8_t value, uint8_t scale)
-{
-    return static_cast<uint8_t>((static_cast<uint16_t>(value) * scale) / 255);
-}
-
-// Fibonacci sequence starting (1, 2, 3, 5, 8, ...) mod 256, tiled using the
-// Pisano period. Seeded from (1,2) so the first values are the visible Fibonacci
-// numbers 1,2,3,5,8,13,21... rather than starting with 0.
-// Built once on first use; the render task is the only caller.
-uint8_t fib_mod256(uint32_t n)
-{
-    static constexpr uint16_t kPisano256 = 384;
-    static uint8_t table[kPisano256];
-    static bool initialized = false;
-    if (!initialized) {
-        table[0] = 1;   // F(0)=1
-        table[1] = 2;   // F(1)=2  → 1,2,3,5,8,13,...
-        for (uint16_t i = 2; i < kPisano256; i++) {
-            table[i] = static_cast<uint8_t>(table[i - 1] + table[i - 2]);
-        }
-        initialized = true;
-    }
-    return table[n % kPisano256];
-}
-
-Rgb render_pixel(const LedOrchestraScene &scene, const LedOrchestraNodeConfig &node, uint16_t global_index,
-                 uint64_t time_ms)
-{
-    switch (scene.effect) {
-    case led_orchestra::matter::kEffectOff:
-        return {.r = 0, .g = 0, .b = 0};
-    case led_orchestra::matter::kEffectSolid:
-        return scale({.r = scene.red, .g = scene.green, .b = scene.blue}, scene.brightness);
-    case led_orchestra::matter::kEffectRainbow: {
-        uint64_t speed = std::max<uint8_t>(scene.speed, 1);
-        uint32_t time_hue = static_cast<uint32_t>((time_ms * speed) / 20);
-        uint32_t pos_hue = (static_cast<uint32_t>(global_index) * 256) / std::max<uint16_t>(node.total_leds, 1);
-        return scale(hsv_to_rgb(static_cast<uint8_t>((time_hue + pos_hue) & 0xff), 255, 255), scene.brightness);
-    }
-    case led_orchestra::matter::kEffectFibonacci: {
-        // Scroll rate: speed=10 → 1 px/s; speed=0 → static gradient.
-        // Every 5 scroll ticks the strip drifts 1 extra LED so the
-        // pattern gently shifts phase and circles back end→start.
-        uint64_t speed = scene.speed;
-        uint32_t strip_len = std::max<uint16_t>(node.total_leds, 1);
-        uint32_t scroll = (speed == 0) ? 0 : static_cast<uint32_t>((time_ms * speed) / 10000);
-        uint32_t drift  = scroll / 5;
-        // Wrap so the pattern circles continuously across the full strip.
-        uint32_t pos = (static_cast<uint32_t>(global_index) + scroll + drift) % strip_len;
-
-        // Every 11 positions step back 2 in the Fibonacci sequence and rotate
-        // the RGB channel assignment by 1. This creates overlapping colour bands
-        // so adjacent segments share Fibonacci values (the "overlap" between the
-        // R/G/B of neighbouring pixels). Net advance per 11-pixel group: 11-2=9.
-        uint32_t gobacks   = pos / 11;
-        uint32_t fib_base  = pos - gobacks * 2;           // net Fibonacci index
-        uint8_t  rgb_shift = static_cast<uint8_t>(gobacks % 3);
-
-        uint8_t channels[3] = {
-            fib_mod256(fib_base),
-            fib_mod256(fib_base + 1),
-            fib_mod256(fib_base + 2),
-        };
-        Rgb color = {
-            .r = channels[rgb_shift % 3],
-            .g = channels[(rgb_shift + 1) % 3],
-            .b = channels[(rgb_shift + 2) % 3],
-        };
-        return scale(color, scene.brightness);
-    }
-    case led_orchestra::matter::kEffectAuroraBreathe: {
-        uint64_t speed = std::max<uint8_t>(scene.speed, 1);
-        uint8_t phase = static_cast<uint8_t>(((time_ms * speed) / 35) + (global_index * 4));
-        uint8_t breath_phase = static_cast<uint8_t>(((time_ms * speed) / 80) + (global_index * 2));
-        uint8_t breath = static_cast<uint8_t>(96 + ((static_cast<uint16_t>(triangle8(breath_phase)) * 159) / 255));
-
-        Rgb color = {
-            .r = modulate(static_cast<uint8_t>(64 + ((static_cast<uint16_t>(triangle8(phase)) * 191) / 255)), breath),
-            .g = modulate(static_cast<uint8_t>(64 + ((static_cast<uint16_t>(triangle8(phase + 85)) * 191) / 255)), breath),
-            .b = modulate(static_cast<uint8_t>(64 + ((static_cast<uint16_t>(triangle8(phase + 170)) * 191) / 255)), breath),
-        };
-        return scale(color, scene.brightness);
-    }
-    default:
-        return {.r = 0, .g = 0, .b = 0};
-    }
-}
 
 uint64_t monotonic_ms()
 {
@@ -188,22 +67,46 @@ void render_task(void *)
     while (true) {
         LedOrchestraScene scene;
         LedOrchestraNodeConfig node;
+        lo::OutputPolicy policy;
         int64_t offset;
+        bool has_pending;
+        LedOrchestraScene pending;
 
         portENTER_CRITICAL(&g_lock);
         scene = g_scene;
         node = g_node;
+        policy = g_output_policy;
         offset = g_clock_offset_ms;
+        has_pending = g_has_pending;
+        pending = g_pending;
         portEXIT_CRITICAL(&g_lock);
 
         uint64_t now_ms = static_cast<uint64_t>(static_cast<int64_t>(monotonic_ms()) + offset);
+
+        // Promote a scheduled scene once its synchronized start time arrives.
+        uint32_t promoted_seq = 0;
+        if (has_pending && now_ms >= pending.scheduled_start_ms) {
+            portENTER_CRITICAL(&g_lock);
+            // Re-check under lock; only promote the same pending scene (a newer
+            // SetScene may have replaced it between our snapshot and here).
+            if (g_has_pending && g_pending.sequence == pending.sequence) {
+                g_scene = g_pending;
+                g_has_pending = false;
+                promoted_seq = g_pending.sequence;
+            }
+            scene = g_scene;
+            portEXIT_CRITICAL(&g_lock);
+        }
+        if (promoted_seq != 0) {
+            ESP_LOGI(TAG, "scheduled scene activated seq=%" PRIu32 " effect=%u", promoted_seq, scene.effect);
+        }
+
         uint16_t segment_len = std::min<uint16_t>(node.segment_len, CONFIG_LED_ORCHESTRA_LED_COUNT);
 
         for (uint16_t local = 0; local < segment_len; local++) {
             uint16_t global = node.segment_start + local;
-            Rgb color = (scene.scheduled_start_ms == 0 || now_ms >= scene.scheduled_start_ms)
-                            ? render_pixel(scene, node, global, now_ms)
-                            : Rgb{.r = 0, .g = 0, .b = 0};
+            lo::CRGB color = led_orchestra_render_effect(scene, node, global, now_ms);
+            color = lo::apply_output_policy(color, policy);
             // Bench strip is a 12V WS2815 wired in RGB wire order, but the
             // led_strip driver only emits GRB. Swap R/G so colors are correct
             // on the wire (blue is identical in both orders).
@@ -225,6 +128,21 @@ esp_err_t led_orchestra_renderer_start()
 {
     if (g_strip != nullptr) {
         return ESP_OK;
+    }
+
+    // Load durable segment config before the render task starts and before the
+    // cluster seeds its attributes from get_node_config(), so a commissioned
+    // node comes up already knowing its place in the virtual strip.
+    {
+        LedOrchestraNodeConfig loaded;
+        bool from_nvs = false;
+        led_orchestra_config_load(loaded, from_nvs);
+        portENTER_CRITICAL(&g_lock);
+        g_node = loaded;
+        portEXIT_CRITICAL(&g_lock);
+        ESP_LOGI(TAG, "config loaded from %s: node=%u segment=[%u,%u) total=%u gpio=%u",
+                 from_nvs ? "NVS" : "defaults", loaded.node_id, loaded.segment_start,
+                 loaded.segment_start + loaded.segment_len, loaded.total_leds, loaded.led_gpio);
     }
 
     led_strip_config_t strip_config = {
@@ -258,17 +176,32 @@ esp_err_t led_orchestra_renderer_start()
 
 esp_err_t led_orchestra_set_scene(const LedOrchestraScene &scene)
 {
-    if (scene.effect > led_orchestra::matter::kEffectAuroraBreathe) {
+    // Reject unknown effect ids via the append-only registry rather than a
+    // hard-coded ceiling, so adding an effect id only touches the effects table.
+    // A rejected command keeps the last valid scene running (keep-last-valid).
+    if (led_orchestra_effect_meta(scene.effect) == nullptr) {
+        ESP_LOGW(TAG, "rejecting unknown effect id %u; keeping last valid scene", scene.effect);
         return ESP_ERR_INVALID_ARG;
     }
 
-    portENTER_CRITICAL(&g_lock);
-    g_scene = scene;
-    portEXIT_CRITICAL(&g_lock);
-
-    ESP_LOGI(TAG, "scene seq=%" PRIu32 " effect=%u rgb=%u,%u,%u speed=%u brightness=%u start=%" PRIu64,
-             scene.sequence, scene.effect, scene.red, scene.green, scene.blue, scene.speed, scene.brightness,
-             scene.scheduled_start_ms);
+    if (scene.scheduled_start_ms == 0) {
+        // Apply immediately and clear any not-yet-due scheduled scene.
+        portENTER_CRITICAL(&g_lock);
+        g_scene = scene;
+        g_has_pending = false;
+        portEXIT_CRITICAL(&g_lock);
+        ESP_LOGI(TAG, "scene seq=%" PRIu32 " effect=%u rgb=%u,%u,%u speed=%u brightness=%u start=now", scene.sequence,
+                 scene.effect, scene.red, scene.green, scene.blue, scene.speed, scene.brightness);
+    } else {
+        // Stage as pending; the render task promotes it at the synchronized
+        // start time. The active scene keeps rendering until then.
+        portENTER_CRITICAL(&g_lock);
+        g_pending = scene;
+        g_has_pending = true;
+        portEXIT_CRITICAL(&g_lock);
+        ESP_LOGI(TAG, "scheduled scene accepted seq=%" PRIu32 " effect=%u start=%" PRIu64 " (offset-adjusted)",
+                 scene.sequence, scene.effect, scene.scheduled_start_ms);
+    }
     return ESP_OK;
 }
 
@@ -284,6 +217,15 @@ esp_err_t led_orchestra_set_node_config(const LedOrchestraNodeConfig &config)
 
     ESP_LOGI(TAG, "node config node=%u segment=[%u,%u) total=%u gpio=%u", config.node_id, config.segment_start,
              config.segment_start + config.segment_len, config.total_leds, config.led_gpio);
+
+    // Persist so the layout survives a power-cycle without re-provisioning. A
+    // persistence failure is logged but does not fail the command: the live
+    // render state is already updated (keep-last-valid), and the hub can
+    // re-provision on the next boot if NVS is unwritable.
+    esp_err_t persist = led_orchestra_config_save(config);
+    if (persist != ESP_OK) {
+        ESP_LOGW(TAG, "node config applied but not persisted (%s)", esp_err_to_name(persist));
+    }
     return ESP_OK;
 }
 

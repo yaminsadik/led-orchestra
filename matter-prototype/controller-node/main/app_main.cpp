@@ -17,6 +17,7 @@
 
 #include "controller_wifi_ingress.h"
 #include "led_orchestra_console.h"
+#include "led_orchestra_ota_provider.h"
 
 static const char *TAG = "lo_controller";
 
@@ -104,6 +105,11 @@ extern "C" void app_main()
     set_openthread_platform_config(&ot_config);
 #endif
 
+    // Offline OTA Provider scaffold (Phase 7). Node/cluster creation must happen
+    // before esp_matter::start() sets up the data model. No-op unless
+    // CONFIG_LED_ORCHESTRA_ENABLE_OTA_PROVIDER is set.
+    ESP_ERROR_CHECK(led_orchestra_ota_provider_init());
+
     ESP_ERROR_CHECK(esp_matter::start(app_event_cb));
 
 #if CONFIG_ESP_MATTER_COMMISSIONER_ENABLE
@@ -116,6 +122,7 @@ extern "C" void app_main()
 
 #if CONFIG_ENABLE_CHIP_SHELL
     ESP_ERROR_CHECK(led_orchestra_console_register_commands());
+    ESP_ERROR_CHECK(led_orchestra_ota_provider_register_commands());
     esp_matter::console::init();
 #endif
 

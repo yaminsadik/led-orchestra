@@ -104,26 +104,46 @@ current working path is a runtime procedure, not a rebuild:
    workaround for the blink/recover power-limit cycle. `brightness=179` is 70%
    and is **not** the same workaround. Ramp up only after the strips are stable.
 
-Today's two-node bench also showed `lo-set-scene 0x0001 ...` logging as
-`destination=0x1`, so use direct per-node `lo-set-scene` commands for the
-power-limit workaround unless the real group path in E.2 has been explicitly
-configured and verified with `--is-group-cmd`.
+Note on unicast vs group: a bare `lo-set-scene 0x0001 ...` logs as
+`destination=0x1` — that is **unicast node 1**, not a group. Real groupcast goes
+through the `lo-*-group` commands below (which encode the group id with
+`chip::NodeIdFromGroupId`). Use direct per-node `lo-set-scene` for the power-limit
+workaround until the group path in E.2 is configured and verified.
 
 ## E.2 Group `SetScene` (the scale gate)
 
-Once ≥ 2 nodes are commissioned, add them to a group and drive **one** group
-command — this is the product behavior (one virtual strip, all segments in sync):
+Once ≥ 2 nodes are commissioned, do the one-time group setup, then drive **one**
+group command — this is the product behavior (one virtual strip, all segments in
+sync). Run `lo-show-group-help` for the exact sequence; in summary:
 
 ```text
-# add each node to group 0x0001 (Groups cluster 0x0004), bind, then group-invoke.
-# group SetScene over the multicast group (cluster 0xFFF1FC00, command 0):
-matter esp controller invoke-cmd <group-id> 1 0xFFF1FC00 0 {"0:U8":1,"1:U8":255,"2:U8":0,"3:U8":0,"4:U8":0,"5:U8":255,"6:U32":10,"7:U64":0} --is-group-cmd
+# 1. Controller-side group keyset (built-in group-settings; once):
+matter esp controller group-settings add-keyset 0x0042 0 0xFFFFFFFFFFFFFFFF <32-hex-epoch-key>
+matter esp controller group-settings bind-keyset 0x0001 0x0042
+matter esp controller group-settings add-group   0x0001 orchestra
+
+# 2. Per node: install the same group key + map (Group Key Management 0x003F),
+#    then enroll the LED endpoint into the group:
+matter esp controller invoke-cmd <node> 0 0x003F 0x00 "<KeySetWrite GroupKeySetStruct>"
+matter esp controller write-attr <node> 0 0x003F 0x00 "[{<GroupKeyMapStruct>}]"
+lo-add-group <node> 1 0x0001 orchestra        # repeat for every node
+
+# 3. One groupcast SetScene reaches all enrolled nodes:
+lo-set-scene-group 0x0001 1 ff0000 10 60
+lo-sync-clock-group 0x0001                     # align clocks first
+lo-scheduled-scene-group 0x0001 3000 1 ff0000 0 60   # all flip together in 3 s
 ```
 
 Gate: **every** commissioned node renders the group scene within the latency
 budget. Because effects are pure functions of `(global_index, time_ms, params)`,
 a single group `SetScene` (+ a shared clock via `SyncClock`) must keep all
 segments coherent without per-node fixups.
+
+**The node-side group-key install (step 2) is the part to confirm on hardware.**
+Until every node holds the group key, a groupcast is silently not accepted and
+each node keeps its last valid scene — so verify by watching **all** strips change
+from one `lo-set-scene-group`, not by the controller's `Done`. Journal the exact
+working `KeySetWrite`/`GroupKeyMap` payloads once proven.
 
 ## E.3 Soak
 

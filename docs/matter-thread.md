@@ -132,15 +132,58 @@ Compatibility rules:
 Prototype implementation notes:
 
 - Cluster id is currently `0xFFF1FC00`, using a development vendor id.
-- The LED node currently renders `off`, `solid`, and `rainbow` using ESP-IDF
-  `led_strip`.
-- FastLED should be evaluated as a C++ component before replacing `led_strip`.
-  Its ESP-IDF CMake path currently expects Arduino-ESP32 integration, so this
-  needs explicit build and hardware validation with ESP-Matter on ESP32-C6.
-- `SetNodeConfig` is RAM-only in the prototype. Durable NVS storage is planned
-  for a later phase.
-- The controller node registers USB shell helpers: `lo-set-scene`,
-  `lo-set-node-config`, and `lo-sync-clock`.
+- The LED node renders `off`, `solid`, `rainbow`, `fibonacci`, and
+  `aurora-breathe` through the effect/color engine onto ESP-IDF `led_strip`.
+- `SetNodeConfig` is **durable**: accepted config is persisted in NVS (magic +
+  version + CRC) and reloaded at boot before the renderer/attributes use it.
+- The controller node registers USB shell helpers: unicast `lo-set-scene`,
+  `lo-set-node-config`, `lo-sync-clock`; group `lo-add-group`,
+  `lo-set-scene-group`, `lo-sync-clock-group`, `lo-scheduled-scene-group`,
+  `lo-show-group-help`; and (build-gated) `lo-ota-*`. See
+  [`console.md`](console.md).
+
+## FastLED Engine
+
+FastLED is the intended effect/**color math** engine on the LED nodes — not (yet)
+the physical driver. The firmware separates the two:
+
+```text
+Matter/Thread command -> renderer state -> color engine (CRGB/CHSV, palettes,
+    blend/fade, wave/easing) -> existing ESP-IDF led_strip RMT output
+```
+
+- The engine ([`led_color.h`](../matter-prototype/led-node/main/led_color.h)) is
+  written once against `lo::` names. Default builds use a compact, dependency-free
+  FastLED-API-compatible backend so group control / durable config / scheduling /
+  OTA never block on FastLED. `CONFIG_LED_ORCHESTRA_USE_FASTLED=y` switches the
+  backend to real FastLED (`<FastLED.h>`).
+- Effects are pure functions of `(global_index, controller time, params, node
+  config)`. An append-only effect metadata registry
+  ([`led_orchestra_effects.cpp`](../matter-prototype/led-node/main/led_orchestra_effects.cpp))
+  carries effect ids, names, per-effect param usage, and palette references
+  (palettes are data). New effect *behavior* ships as compiled firmware via OTA;
+  no runtime-uploaded effect code.
+- The engine also exposes an output-policy hook: per-strip color
+  correction/temperature, master brightness, and a future power-budget policy.
+- **FastLED as the physical driver is a separate, hardware-gated spike.** Do not
+  enable `CONFIG_LED_ORCHESTRA_USE_FASTLED` (or move output to FastLED) until a
+  spike proves it on ESP32-C6 + ESP-IDF v5.4.1 with ESP-Matter/OpenThread/BLE/OTA
+  all active, with no heap/flash/timing regression. The LED-node app is already
+  near its OTA-slot flash ceiling (~2% free), so the FastLED spike needs flash
+  headroom work first.
+
+## Group Control
+
+All-node activation uses real Matter groupcast. An application group id `g` is
+addressed as `chip::NodeIdFromGroupId(g)` (a NodeId `>= 0xFFFFFFFFFFFF0000`), which
+is what makes the SDK dispatch a groupcast; a bare small id on a unicast command
+targets a node instead. Enrollment is the standard Groups cluster (`0x0004`
+AddGroup, one unicast per endpoint); groupcast acceptance additionally requires
+group keys installed on the controller (`controller group-settings ...`) and on
+each node (Group Key Management `0x003F` KeySetWrite + GroupKeyMap). The node-side
+key install is the hardware-gated step; see
+[`console.md`](console.md#one-time-group-key--enrollment-setup). Distribute config
+unicast, then activate by group at a synchronized scheduled time.
 - **Border-router decision (resolved 2026-06-02).** A single native-Thread
   ESP32-C6 cannot be a self-contained Matter commissioner: BLE commissioning and
   SRP registration succeed, but operational discovery times out (`dns browse` →

@@ -30,4 +30,17 @@ config LED_ORCHESTRA_TOTAL_LEDS
     default 60
     range 1 65535
 
+config LED_ORCHESTRA_USE_FASTLED
+    bool "Back the color/effect engine with real FastLED (hardware-gated spike)"
+    default n
+    help
+        When enabled, the led_color.h engine aliases its types/helpers to real
+        FastLED (<FastLED.h>) instead of the built-in FastLED-compatible
+        fallback. This is the FastLED integration spike and requires vendoring
+        FastLED as an ESP-IDF component. FastLED stays the color/effect MATH
+        engine only; physical output stays on the ESP-IDF led_strip RMT path
+        until a FastLED-output spike is proven on ESP32-C6 with Matter/Thread/
+        BLE/OTA active. Leave OFF until that spike passes (see
+        docs/matter-thread.md, "FastLED Engine").
+
 endmenu

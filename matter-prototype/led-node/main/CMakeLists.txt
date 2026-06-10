@@ -1,6 +1,8 @@
 idf_component_register(SRCS
                            "app_main.cpp"
                            "led_orchestra_cluster.cpp"
+                           "led_orchestra_config_store.cpp"
+                           "led_orchestra_effects.cpp"
                            "led_orchestra_renderer.cpp"
                        INCLUDE_DIRS
                            "."
