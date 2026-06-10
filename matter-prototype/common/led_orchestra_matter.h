@@ -58,6 +58,9 @@ enum EffectId : uint8_t {
     // (mod 256) along the virtual strip; the sequence scrolls down the strip
     // with speed. Append-only: never reorder or reuse effect ids.
     kEffectFibonacci = 3,
+    // Soft overlapping RGB waves with a global breathe curve. Designed to avoid
+    // hard primary-only bands on sparse/short bench strips.
+    kEffectAuroraBreathe = 4,
 };
 
 } // namespace matter

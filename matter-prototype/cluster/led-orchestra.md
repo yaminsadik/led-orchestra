@@ -17,6 +17,8 @@ Matter.
   - `3`: fibonacci — per-pixel R/G/B are consecutive Fibonacci numbers (mod 256)
     along the strip; scrolls down the strip with `speed` (`speed = 0` holds a
     static gradient). Ignores the `red`/`green`/`blue` fields.
+  - `4`: aurora breathe — soft overlapping RGB waves with a breathing intensity
+    curve; scrolls with `speed` and ignores the `red`/`green`/`blue` fields.
 
 Use the private development VID/PID during prototypes. Do not allocate final
 cluster ids or certification metadata until the Matter product direction is

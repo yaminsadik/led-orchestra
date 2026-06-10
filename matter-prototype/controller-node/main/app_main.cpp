@@ -1,10 +1,13 @@
 #include <esp_err.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_matter.h>
 #include <esp_matter_console.h>
 #include <esp_matter_controller_client.h>
 #include <esp_matter_controller_console.h>
+#include <esp_system.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <nvs_flash.h>
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
@@ -16,6 +19,21 @@
 #include "led_orchestra_console.h"
 
 static const char *TAG = "lo_controller";
+
+// Stage D/E instrumentation: emit the two quantitative gate metrics (min free
+// heap, largest free block) on a fixed cadence so heap drift is greppable across
+// power-cycle and soak runs. See the Pass/Fail Metrics table in
+// docs/controller-topology-validation.md.
+static void heap_stats_task(void *)
+{
+    for (;;) {
+        ESP_LOGI("lo_heap", "free=%u min_free=%u largest=%u",
+                 (unsigned) esp_get_free_heap_size(),
+                 (unsigned) esp_get_minimum_free_heap_size(),
+                 (unsigned) heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+        vTaskDelay(pdMS_TO_TICKS(10000));
+    }
+}
 
 static void app_event_cb(const ChipDeviceEvent *event, intptr_t)
 {
@@ -45,6 +63,7 @@ extern "C" void app_main()
     esp_log_level_set("lo_controller", ESP_LOG_INFO);
     esp_log_level_set("lo_wifi_ingress", ESP_LOG_INFO);
     esp_log_level_set("lo_console", ESP_LOG_INFO);
+    esp_log_level_set("lo_heap", ESP_LOG_INFO);
 
     // Keep the noisy wifi:/OPENTHREAD: drivers at WARN, but surface Matter
     // commissioning progress so `pairing ble-thread` is debuggable: BLE link,
@@ -99,6 +118,8 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(led_orchestra_console_register_commands());
     esp_matter::console::init();
 #endif
+
+    xTaskCreate(heap_stats_task, "heap_stats", 3072, nullptr, tskIDLE_PRIORITY + 1, nullptr);
 
     ESP_LOGI(TAG, "LED Orchestra controller node ready");
 }

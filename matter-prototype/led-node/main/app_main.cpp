@@ -1,7 +1,11 @@
 #include <esp_err.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_matter.h>
 #include <esp_matter_console.h>
+#include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <nvs_flash.h>
 
 #include <app/server/CommissioningWindowManager.h>
@@ -16,6 +20,21 @@
 
 static const char *TAG = "lo_led_node";
 uint16_t light_endpoint_id = 0;
+
+// Stage D/E instrumentation: emit the two quantitative gate metrics (min free
+// heap, largest free block) on a fixed cadence so heap drift is greppable across
+// power-cycle and soak runs. See the Pass/Fail Metrics table in
+// docs/controller-topology-validation.md.
+static void heap_stats_task(void *)
+{
+    for (;;) {
+        ESP_LOGI("lo_heap", "free=%u min_free=%u largest=%u",
+                 (unsigned) esp_get_free_heap_size(),
+                 (unsigned) esp_get_minimum_free_heap_size(),
+                 (unsigned) heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+        vTaskDelay(pdMS_TO_TICKS(10000));
+    }
+}
 
 using namespace esp_matter;
 using namespace esp_matter::attribute;
@@ -82,6 +101,9 @@ extern "C" void app_main()
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+
+    esp_log_level_set("lo_heap", ESP_LOG_INFO);
+    xTaskCreate(heap_stats_task, "heap_stats", 3072, nullptr, tskIDLE_PRIORITY + 1, nullptr);
 
     ESP_ERROR_CHECK(led_orchestra_renderer_start());
 

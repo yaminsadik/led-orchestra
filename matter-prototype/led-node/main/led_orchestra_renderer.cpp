@@ -85,6 +85,16 @@ Rgb hsv_to_rgb(uint8_t h, uint8_t s, uint8_t v)
     }
 }
 
+uint8_t triangle8(uint8_t phase)
+{
+    return phase < 128 ? static_cast<uint8_t>(phase * 2) : static_cast<uint8_t>((255 - phase) * 2);
+}
+
+uint8_t modulate(uint8_t value, uint8_t scale)
+{
+    return static_cast<uint8_t>((static_cast<uint16_t>(value) * scale) / 255);
+}
+
 // Fibonacci sequence starting (1, 2, 3, 5, 8, ...) mod 256, tiled using the
 // Pisano period. Seeded from (1,2) so the first values are the visible Fibonacci
 // numbers 1,2,3,5,8,13,21... rather than starting with 0.
@@ -147,6 +157,19 @@ Rgb render_pixel(const LedOrchestraScene &scene, const LedOrchestraNodeConfig &n
             .r = channels[rgb_shift % 3],
             .g = channels[(rgb_shift + 1) % 3],
             .b = channels[(rgb_shift + 2) % 3],
+        };
+        return scale(color, scene.brightness);
+    }
+    case led_orchestra::matter::kEffectAuroraBreathe: {
+        uint64_t speed = std::max<uint8_t>(scene.speed, 1);
+        uint8_t phase = static_cast<uint8_t>(((time_ms * speed) / 35) + (global_index * 4));
+        uint8_t breath_phase = static_cast<uint8_t>(((time_ms * speed) / 80) + (global_index * 2));
+        uint8_t breath = static_cast<uint8_t>(96 + ((static_cast<uint16_t>(triangle8(breath_phase)) * 159) / 255));
+
+        Rgb color = {
+            .r = modulate(static_cast<uint8_t>(64 + ((static_cast<uint16_t>(triangle8(phase)) * 191) / 255)), breath),
+            .g = modulate(static_cast<uint8_t>(64 + ((static_cast<uint16_t>(triangle8(phase + 85)) * 191) / 255)), breath),
+            .b = modulate(static_cast<uint8_t>(64 + ((static_cast<uint16_t>(triangle8(phase + 170)) * 191) / 255)), breath),
         };
         return scale(color, scene.brightness);
     }
@@ -235,7 +258,7 @@ esp_err_t led_orchestra_renderer_start()
 
 esp_err_t led_orchestra_set_scene(const LedOrchestraScene &scene)
 {
-    if (scene.effect > led_orchestra::matter::kEffectFibonacci) {
+    if (scene.effect > led_orchestra::matter::kEffectAuroraBreathe) {
         return ESP_ERR_INVALID_ARG;
     }
 

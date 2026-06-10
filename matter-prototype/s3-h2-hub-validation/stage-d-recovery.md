@@ -1,96 +1,162 @@
-# Stage D — Repeatability + Recovery
+# Stage D — Repeatability + Recovery (split topology)
 
-**Goal:** move the S3+H2 one-board hub from "worked once" (Stage C) to a
-**credible hub** — prove the commission → discover → CASE → `SetScene` path
-survives repetition and unclean power-cycles of both the hub and the LED.
+**Goal:** move the proven split hub from "worked once" (Stage B re-confirmed on
+2026-06-09) to a **credible hub** — prove the commission → discover → CASE →
+`SetScene` path survives repetition and unclean power-cycles of **every** hub
+component and of the LED.
 
-**Topology:** unchanged from [`stage-c-onehub.md`](stage-c-onehub.md) — S3
-(controller + esp-thread-br host) + H2 RCP + ≥ 1 C6 LED node.
+> **Topology note.** Stage C (the co-located S3+H2 one-board hub) failed its
+> offline operational-discovery gate on 2026-06-09 and is **parked** on the
+> heap/flash-headroom rationale. Stage D therefore runs on the **split**: the
+> S3+H2 board as **BR-only** + a **separate C6 controller** + ≥ 1 C6 LED. The
+> one-board variant of this runbook is preserved in git history if it is ever
+> revisited.
+
+**Topology under test**
+
+```text
+ESP32-S3 (+H2 RCP) = BR-only: Thread border router + SRP server (thread_border_router_otcli)
+ESP32-C6 #1        = Matter commissioner/controller (lo-* console; Thread leader; Wi-Fi off)
+ESP32-C6 LED(s)    = Thread accessory(ies), custom cluster 0xFFF1FC00
+```
+
+So **"the hub" is now two devices** (the S3 BR + the C6 controller). Recovery
+must restore **both** independently and together — that is the substance of D.3.
 
 **Gate (all must hold):**
 
-- **100% recovery** over the agreed initial cycle count (≥ 20 power-yank cycles
-  per the validation doc), with the **first successful scene ≤ 60 s** after the
-  hub boots.
-- **No monotonic heap drift** in the short run (min free heap and largest free
-  block do not trend down across the repeated operations).
-- **No DNS-SD regression** (`dns browse` keeps returning the LED record).
+- **100% recovery** over the agreed cycle count (≥ 20 power-yank cycles per the
+  validation doc), with the **first successful scene ≤ 60 s** after the cycled
+  device is back.
+- **No monotonic heap drift** on the controller **or** the LED across the run
+  (min free heap and largest free block do not trend down).
+- **No DNS-SD regression** (`dns browse` on the controller keeps returning the
+  LED record).
 - **No CASE-timeout regression** (no `Error 28` / `Error 32`).
+- **Credentials persist across reboot (NVS):** the S3 keeps its Thread dataset,
+  the C6 controller keeps its Thread dataset **and** Matter fabric. Losing either
+  (forcing a re-commission) is a **FAIL** to journal.
 
-> Prereq: **Stage C PASS** recorded in
-> [`../../docs/controller-topology-validation.md`](../../docs/controller-topology-validation.md).
-> If Stage C passed only with a local Wi-Fi backbone, re-run every step here in
-> that same backbone configuration and note it (recovery must also restore the
-> backbone path).
+> Prereq: the split is the **re-confirmed Stage B baseline** (2026-06-09 rollback
+> validation — fresh LED commissioned as node `3`, `lo-set-scene 3 …` rendered).
+> See [`../../docs/controller-topology-validation.md`](../../docs/controller-topology-validation.md)
+> and [`../../docs/checkpoints/2026-06-09-stage-b-split-known-good.md`](../../docs/checkpoints/2026-06-09-stage-b-split-known-good.md).
 
----
+## Heap instrumentation (built in)
+
+Both `controller-node` and `led-node` now emit, every ~10 s, the two
+quantitative gate metrics (added in `app_main.cpp`):
+
+```text
+lo_heap: free=<bytes> min_free=<bytes> largest=<bytes>
+```
+
+`min_free` is `esp_get_minimum_free_heap_size()`; `largest` is
+`heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)` — exactly the gate's
+"Min free heap" and "Largest free block". Capture by grepping the monitor logs:
+
+```bash
+idf.py -p <PORT> monitor | grep lo_heap | tee stage-d-heap-<device>.log
+```
+
+Sample `min_free`/`largest` at the start of each step and after each batch; the
+**trend** is what the no-drift gate checks. (The S3 BR is the stock
+`thread_border_router_otcli` image — sample its heap with the built-in `heap`
+diagnostic on its console; it is not the load-bearing controller, so the C6
+controller and the LED are the primary subjects.)
 
 ## D.1 Repeat the operation loop (no reboot)
 
-With the LED already commissioned from Stage C, exercise the **operational** path
-(no BLE, no re-commission) several times and watch the heap, per the
+With a LED already commissioned, exercise the **operational** path (no BLE, no
+re-commission) several times and watch the heap, per the
 [2026-06-04 lesson](../../docs/debugging-journal.md) that `error 32` fires
-*post-commit* — so CASE on an already-commissioned node is the right stressor:
+*post-commit* — so CASE on an already-commissioned node is the right stressor.
+Drive it from the **C6 controller** console with `lo-set-scene` (arg order:
+`<node-id> <endpoint> <effect> <rgbhex> <speed> <brightness> <seq>`; arg 2 is the
+**endpoint**; bump `<seq>` each call — it is monotonic by contract):
 
 ```text
 # repeat N times (start with N = 10), alternating scenes so the change is visible:
-matter esp controller invoke-cmd <node-id> 1 0xFFF1FC00 0 {"0:U8":1,"1:U8":255,"2:U8":0,"3:U8":0,"4:U8":0,"5:U8":255,"6:U32":1,"7:U64":0}
-matter esp controller invoke-cmd <node-id> 1 0xFFF1FC00 0 {"0:U8":1,"1:U8":0,"2:U8":0,"3:U8":255,"4:U8":0,"5:U8":255,"6:U32":2,"7:U64":0}
-
-# after each batch, sample the heap on the hub (esp-idf 'heap' diag,
-# or just read the firmware's periodic free-heap / min-free-heap log line):
-heap
+lo-set-scene <node-id> 1 1 ff0000 0 255 <seq>     # solid red
+lo-set-scene <node-id> 1 1 0000ff 0 255 <seq+1>   # solid blue
 ```
 
-Record min free heap + largest free block at the start and after each batch.
-Bump the `6:U32 sequence` field each call (it is monotonic by contract).
+Record `lo_heap min_free`/`largest` on the controller and the LED at the start
+and after each batch of N.
 
 ## D.2 Power-cycle the LED (hub stays up)
 
 ```text
 # physically power-yank the C6 LED, then re-power it.
-# on the hub, confirm it rediscovers + re-resolves WITHOUT a re-commission:
-matter esp ot_cli dns browse _matter._tcp.default.service.arpa     # record still present
-matter esp controller invoke-cmd <node-id> 1 0xFFF1FC00 0 {"0:U8":1,"1:U8":0,"2:U8":255,"3:U8":0,"4:U8":0,"5:U8":255,"6:U32":3,"7:U64":0}
+# on the C6 controller, confirm it rediscovers + re-resolves WITHOUT re-commission:
+matter esp ot_cli dns browse _matter._tcp.default.service.arpa     # LED record returns
+lo-set-scene <node-id> 1 1 00ff00 0 255 <seq>                      # solid green
 ```
 
-Gate: the node rejoins Thread, the record reappears, and the next `SetScene`
+Gate: the node rejoins Thread, the record reappears, and the next `lo-set-scene`
 renders — first scene **≤ 60 s** after the LED boots. **Keep-last-valid:** while
-the LED is rebooting, an already-rendering node must hold its last scene (verify
-on a second node if present).
+that LED reboots, any *other* already-rendering node must hold its last scene
+(verify on a second node — nodes 1/2/3 are available per the checkpoint).
 
 ## D.3 Power-cycle the hub (the real deployment event)
 
+In the split, "the hub" is two devices, so test each path. Run each ≥ 20 cycles
+and log a pass/fail per cycle.
+
+### D.3a — Power-cycle the S3 BR alone
+
 ```text
-# physically power-yank the S3+H2 hub, then re-power it.
+# power-yank the S3+H2 board, then re-power. On the S3 BR console:
 matter esp ot_cli rcp version          # S3<->H2 link back (no repeated RCP resets)
-matter esp ot_cli state                # leader/router (re-forms or re-attaches)
+matter esp ot_cli state                # re-attaches (router/leader)
 matter esp ot_cli srp server state     # running
+# on the C6 controller, after LEDs re-register with the returned SRP server:
 matter esp ot_cli dns browse _matter._tcp.default.service.arpa   # LED record returns
-matter esp controller invoke-cmd <node-id> 1 0xFFF1FC00 0 {"0:U8":1,"1:U8":255,"2:U8":128,"3:U8":0,"4:U8":0,"5:U8":255,"6:U32":4,"7:U64":0}
+lo-set-scene <node-id> 1 1 ffff00 0 255 <seq>
 ```
 
-Gate: after an unclean hub power-down, the BR comes back, the RCP link is healthy,
-discovery + CASE + `SetScene` work again, first scene **≤ 60 s**. Repeat for the
-agreed cycle count (≥ 20) and log a pass/fail per cycle.
+Gate: the BR returns, RCP link healthy, the SRP server repopulates (LEDs
+re-register), discovery + CASE + `SetScene` work again, first scene **≤ 60 s**.
+The S3 must **keep its Thread dataset** across the yank (NVS) — losing it is a
+FAIL.
 
-> Note the fabric/dataset must be **persistent** across reboot (NVS). If the hub
-> loses its Thread dataset or Matter fabric on power-cycle, that is a Stage D
-> FAIL to journal — the hub must keep credentials, not re-commission.
+### D.3b — Power-cycle the C6 controller alone
+
+```text
+# power-yank the C6 controller, then re-power. On the controller console:
+matter esp ot_cli state                # rejoins the mesh from NVS dataset
+lo-set-scene <node-id> 1 1 ff8000 0 255 <seq>    # re-resolve + control resumes
+```
+
+Gate: the controller reloads its **Matter fabric + Thread dataset from NVS**
+(never re-commissions), re-resolves the node, and the first scene renders
+**≤ 60 s**. Note the [checkpoint gotcha](../../docs/checkpoints/2026-06-09-stage-b-split-known-good.md):
+a controller reset clears stale operational CASE sessions — confirm whether a
+clean reboot already does this or whether an explicit reset step is needed, and
+record which.
+
+### D.3c — Power-cycle both (full hub yank)
+
+Yank S3 BR and C6 controller together, re-power, and run the full
+bring-up + control check. This is the true deployment power event.
+
+Gate: both come back from NVS, Thread re-forms, discovery + CASE + `SetScene`
+work, first scene **≤ 60 s**, no Error 28/32.
 
 ## Evidence (fill at the bench)
 
 ```text
 Date / operator:
-Backbone config (offline | local wifi, same as Stage C?):
-D.1 repeat loop:  N batches, min-free-heap start -> end / largest-free-block start -> end:
-D.1 heap drift?   (monotonic down = FAIL):
+Controller firmware (heap-instrumented build? y/n):  LED firmware (heap-instrumented? y/n):
+D.1 repeat loop:  N batches, controller min-free start -> end / largest start -> end:
+D.1 LED min-free start -> end / largest start -> end:
+D.1 heap drift?   (monotonic down on either = FAIL):
 D.2 LED power-cycle:  rediscovered w/o re-commission? first-scene seconds:
-D.2 keep-last-valid on a 2nd node? (y/n/NA):
-D.3 hub power-cycle cycles:  <pass>/<total>  (target 100% of >=20):
-D.3 first-scene seconds (min/median/max):
-D.3 rcp version after reboot / RCP reset count over the run:
-D.3 dataset+fabric persisted across reboot? (y/n):
+D.2 keep-last-valid on another node? (y/n):
+D.3a S3-BR cycles:    <pass>/<total>; SRP repopulated? dataset persisted? first-scene s (min/med/max):
+D.3b controller cycles: <pass>/<total>; fabric+dataset persisted (no re-commission)? reset needed for stale CASE? first-scene s:
+D.3c both-yank cycles:  <pass>/<total>; first-scene s (min/med/max):
+rcp version after reboot / RCP reset count over the run:
 Any Error 28 / Error 32?  (must be none):
 Pass/Fail vs gate:
 Notes:
@@ -98,12 +164,12 @@ Notes:
 
 ## Decision
 
-- **PASS** → the hub is repeatable + recoverable for one node; proceed to
+- **PASS** → the split hub is repeatable + recoverable for one node; proceed to
   [`stage-e-scale-soak.md`](stage-e-scale-soak.md). Record the cycle count, the
   heap trend, and the first-scene timing in
   [`../../docs/controller-topology-validation.md`](../../docs/controller-topology-validation.md).
-- **FAIL — recovery < 100% or heap drifts** → if the failure is co-located
-  headroom/stability, fall back to **Fallback 1, the all-C6 split** (Stage 0
-  config: controller on its own C6). If it is a discrete bug (lost dataset, RCP
-  reset storm), file a [`debugging-journal.md`](../../docs/debugging-journal.md)
-  entry, fix, and re-run before falling back.
+- **FAIL — recovery < 100%, heap drift, or lost credentials** → if it is a
+  discrete bug (lost dataset, RCP reset storm, stale-CASE hang), file a
+  [`debugging-journal.md`](../../docs/debugging-journal.md) entry, fix, and re-run.
+  The split is already the fallback rung, so a *fundamental* split failure
+  escalates to **Fallback 2 (Pi / `ot-br-posix`)** rather than back to one-board.
