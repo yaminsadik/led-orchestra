@@ -1355,3 +1355,66 @@ GroupKeyMap with visible status + `read-attr`/KeySetReadAllIndices read-backs
 until `lo-set-scene-group` lights the nodes. Also: the **3rd LED still needs
 connecting + commissioning as node 1**. Once a groupcast works, journal the exact
 KeySetWrite + GroupKeyMap payloads (per the runbook).
+
+## 2026-06-10 (cont.) — Group Control: Node-Side Encoding SOLVED; Controller Keyset Is the Last Blocker
+
+Drove the group bring-up to ground truth with status visibility. The node-side
+payloads — the runbook's "unproven" part — are now **solved and proven**. The
+remaining blocker is **controller-side**: its group keyset never registers.
+
+### `invoke-cmd`/`write-attr` JSON encoding facts (from esp-matter source)
+
+- **`BYT` octet strings are base64, not hex** (`json_to_tlv.cpp:357-368`,
+  `is_valid_base64_str` + `Base64Decode`). The 16-byte test epoch key
+  `d0d1…dedf` → base64 **`0NHS09TV1tfY2drb3N3e3w==`**. (Controller-side
+  `group-settings add-keyset` takes the key as **hex** via `oct_str_to_byte_arr`
+  — 32 hex chars = 16 bytes — so the two sides encode the *same* 16 bytes.)
+- **List/array attribute writes need a wrapper object, NOT a bare array.**
+  `send_request` (`esp_matter_client.cpp:567-577`) encodes the value as a TLV
+  structure, then **opens that structure and takes its first field as the actual
+  attribute value**. So a list write must be `[{"0:ARR-OBJ":[ <entries> ]}]`:
+  the outer `[…]` is one element per attribute path; the inner `{"0:ARR-OBJ":[…]}`
+  is the wrapper whose first field is the list. A bare `[{"1:U16":1,"2:U16":66}]`
+  writes the scalar `1` into the list attribute → IM `0x0501`.
+- **`IM:0x0501`** = `kIMGlobalStatus`(SdkPart 5, `CHIPError.h:110`) + code `0x01`
+  = **Failure**.
+- `esp_log_level_set("chip[TOO]"…)` surfaces **error**-level IM responses but not
+  success/data responses (CHIP gates Progress/Detail at its own category filter).
+  Use the *error path* + read-back commands (KeySetRead/ViewGroup error vs no-error)
+  to infer success.
+
+### Proven-working node-side payloads (node id 2, endpoint 0/1)
+
+```text
+# KeySetWrite (cluster 0x003F cmd 0x00) — installs keyset 66 (KeySetRead 0x01 confirms, no NOT_FOUND):
+invoke-cmd 2 0 0x003F 0x00 {"0:OBJ":{"0:U16":66,"1:U8":0,"2:BYT":"0NHS09TV1tfY2drb3N3e3w==","3:U64":1,"4:NULL":null,"5:NULL":null,"6:NULL":null,"7:NULL":null}}
+
+# GroupKeyMap write (cluster 0x003F attr 0x00) — maps group 1 -> keyset 66, NO error with the wrapper:
+write-attr 2 0 0x003F 0x00 [{"0:ARR-OBJ":[{"1:U16":1,"2:U16":66}]}]
+
+# Groups membership: AddGroup (0x0004/0x00) OK; ViewGroup (0x0004/0x01) returns no-error => member.
+lo-add-group 2 1 0x0001 orchestra
+```
+
+On reboot the node logs `chip[SVR]: Joining Multicast groups`, so membership +
+multicast subscription are live. NVS persists all of it across power-cycle.
+
+### THE remaining blocker (controller-side)
+
+`group-settings` on the controller does **not** register a usable keyset:
+
+```text
+add-keyset 0x0042 0 0xFFFFFFFFFFFFFFFF d0d1…dedf   -> "Done"  but show-keysets is EMPTY
+bind-keyset 0x0001 0x0042                          -> E groupsettings: Failed to bind keyset / Error 0x05FFFFFF
+show-keysets / show-groups                         -> empty
+```
+
+So the controller can't encrypt a groupcast; node 2 (fully provisioned, joined to
+the multicast) silently drops it → `lo-set-scene-group` never renders, while
+unicast `lo-set-scene` to the same node works fine. **Next:** fix why the
+commissioner's `GroupDataProvider` rejects `add-keyset`/`bind-keyset` (likely
+fabric-index / provider-init for the controller fabric) — decode `0x05FFFFFF`,
+check the commissioner fabric index used by `group-settings`, and whether group
+keysets must be installed against that specific fabric. Once `show-keysets` lists
+keyset 66 bound to group 1, the groupcast should light node 2 immediately (all
+node-side state is already correct).

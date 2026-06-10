@@ -76,6 +76,15 @@ extern "C" void app_main()
     esp_log_level_set("chip[BLE]", ESP_LOG_INFO);
     esp_log_level_set("chip[DL]", ESP_LOG_INFO);
 
+    // Surface Interaction-Model status + decoded responses so group-key bring-up
+    // (KeySetWrite/GroupKeyMap on cluster 0x003F) shows exact node status codes
+    // and attribute/command read-backs instead of opaque "Done". Lower back to
+    // WARN once group control is proven.
+    esp_log_level_set("chip[TOO]", ESP_LOG_INFO);
+    esp_log_level_set("chip[DMG]", ESP_LOG_INFO);
+    esp_log_level_set("chip[IM]", ESP_LOG_INFO);
+    esp_log_level_set("chip[ZCL]", ESP_LOG_INFO);
+
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
