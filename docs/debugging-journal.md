@@ -1304,3 +1304,54 @@ deferred in favor of moving to multi-node testing; the boot path is identical.)
 USB ports renumber on every reconnect/reset — always re-map before flashing.
 Driving the console from a host script works for short lines; long
 `pairing ble-thread` still needs paced writes.
+
+## 2026-06-10 — Phase 5 Group Control: Encoding Pinned, Node-Side Key Install Still Blocked
+
+### State (paused mid-bringup)
+
+Bench reflashed to HEAD (controller + LED nodes 2/3, `app-flash` so commissioning
+survived). Unicast control works on the new firmware. Group control got partway:
+the **node-side group-key install is still the unproven gating step** (as the
+Phase 5/6/7 runbook predicted).
+
+### What is proven
+
+- **Controller-side group setup** all returned `Done`:
+  ```text
+  matter esp controller group-settings add-keyset 0x0042 0 0xFFFFFFFFFFFFFFFF d0d1d2d3d4d5d6d7d8d9dadbdcdddedf
+  matter esp controller group-settings bind-keyset 0x0001 0x0042
+  matter esp controller group-settings add-group   0x0001 orchestra
+  ```
+  (`d0d1…dedf` = the standard Matter test epoch key, dev only.)
+- **`invoke-cmd`/`write-attr` JSON encoding is pinned** (from
+  `esp_matter/utils/json_to_tlv.h`): tag tokens are `U8/U16/U32/U64/I8…`,
+  `BOOL`, `FP`/`DFP`, **`BYT`** = octet string (hex value), **`STR`** = char
+  string, **`NULL`**, **`OBJ`** = struct, **`ARR-<SUBTYPE>`** = array (the array
+  type *requires* a subtype after a hyphen, e.g. `ARR-OBJ`).
+- **KeySetWrite** (cluster `0x003F` cmd `0x00`) dispatched with **no controller
+  error** using:
+  ```text
+  invoke-cmd 2 0 0x003F 0x00 {"0:OBJ":{"0:U16":66,"1:U8":0,"2:BYT":"d0d1d2d3d4d5d6d7d8d9dadbdcdddedf","3:U64":1,"4:NULL":null,"5:NULL":null,"6:NULL":null,"7:NULL":null}}
+  ```
+  …but it was **not confirmed installed** (KeySetReadAllIndices `0x04` returned
+  nothing visible).
+
+### The blocker
+
+`write-attr 2 0 0x003F 0x00 [{"1:U16":1,"2:U16":66}]` (GroupKeyMap) → the node
+returned **`chip[TOO]: Response Failure: Error IM:0x00000501`**. A subsequent
+group `lo-set-scene-group 0x0001 …` reached **no** node (correct — the key isn't
+installed). The IM `0x0501` is a *node-side* rejection, likely because the keyset
+wasn't actually present (KeySetWrite unconfirmed) or the GroupKeyMap list format
+is wrong.
+
+### Why it stalled: no status visibility
+
+The controller keeps `chip[TOO]`/`chip[IM]`/`chip[DMG]`/`chip[ZCL]` at **WARN**,
+so node IM status codes and keyset read-backs are invisible — every attempt is a
+guess. **Resume plan:** add `esp_log_level_set("chip[TOO]"/[IM]/[DMG]/[ZCL],
+ESP_LOG_INFO)` to the controller `app_main`, reflash, then iterate KeySetWrite +
+GroupKeyMap with visible status + `read-attr`/KeySetReadAllIndices read-backs
+until `lo-set-scene-group` lights the nodes. Also: the **3rd LED still needs
+connecting + commissioning as node 1**. Once a groupcast works, journal the exact
+KeySetWrite + GroupKeyMap payloads (per the runbook).
