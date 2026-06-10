@@ -106,13 +106,14 @@ C6/H2 esp-thread-br path itself not stable -> Pi / ot-br-posix
 
 ## Phase 5: Multi-Node Offline Thread Mesh
 
-Status: **firmware landed on the split topology; hardware gate pending.** Real
-Matter group control is implemented — `lo-add-group` (Groups cluster AddGroup),
+Status: **two-node groupcast gate passed on the split topology (2026-06-10).** Real
+Matter group control is implemented and hardware-proven on LED nodes 2/3 —
+`lo-add-group` (Groups cluster AddGroup),
 `lo-set-scene-group` / `lo-sync-clock-group` / `lo-scheduled-scene-group` (group
 ids encoded with `chip::NodeIdFromGroupId`), plus `lo-show-group-help` for the
-one-time group-key sequence. Both ESP32-C6 apps build. **Not** done until
-hardware confirms every node renders from one group command (the node-side group
-key install via Group Key Management `0x003F` is the step to verify).
+one-time group-key sequence. Both ESP32-C6 apps build. The proven node-side
+sequence is Group Key Management `0x003F` KeySetWrite + GroupKeyMap, Groups
+`AddGroup`, and Access Control `0x001F` ACL for the group subject.
 
 Goal: control multiple LED nodes through the hub over Thread, with no venue
 Wi-Fi/router/internet requirement.

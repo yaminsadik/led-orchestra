@@ -1418,3 +1418,113 @@ check the commissioner fabric index used by `group-settings`, and whether group
 keysets must be installed against that specific fabric. Once `show-keysets` lists
 keyset 66 bound to group 1, the groupcast should light node 2 immediately (all
 node-side state is already correct).
+
+## 2026-06-10 (cont.) — Phase 5 Group Control: ACL Fixed; Two-Node Groupcast PASSED
+
+### Result
+
+Continued from `dbd4d18` with the controller log visibility still enabled. The
+previous "controller keyset is empty" conclusion was stale: after adding
+`groupsettings` INFO logs, the controller-side `GroupDataProvider` clearly held
+keyset `0x0042` and group `0x0001 -> 0x0042 orchestra`. The real remaining
+node-side gate was **Access Control**, not controller key storage. After adding
+the per-node ACL entry for group `0x0001`, one `lo-set-scene-group` rendered on
+both physical LED nodes 2 and 3.
+
+### Facts From Hardware
+
+Controller state was good:
+
+```text
+matter esp controller group-settings show-keysets
+groupsettings: fabric=1 provider=0x40819ad8 keyset_count=5
+groupsettings: | 0x42 Trust First |
+
+matter esp controller group-settings show-groups
+groupsettings: fabric=1 provider=0x40819ad8 group_count=4
+groupsettings: | 0x1 0x42 orchestra |
+```
+
+Before the ACL fix, re-running `lo-add-group 2 1 0x0001 orchestra` proved the
+Groups cluster membership path and multicast join were working:
+
+```text
+chip[IN]: Joining Multicast Group with address UDP:[FF35:40:FD00::100:1]:5540
+```
+
+The groupcast then reached node 2 but was rejected by Matter access control:
+
+```text
+chip[EM]: Received Groupcast Message with GroupId 0x0001 (1)
+chip[DMG]: AccessControl: denied
+```
+
+So the transport, group key, and multicast membership were already past the
+gate; the node simply lacked an ACL entry authorizing group-subject invokes.
+
+### Working Per-Node Sequence
+
+For each commissioned LED node:
+
+```text
+# Group Key Management: KeySetWrite, keyset 66, epoch key d0d1..dedf as base64.
+matter esp controller invoke-cmd <node> 0 0x003F 0x00 {"0:OBJ":{"0:U16":66,"1:U8":0,"2:BYT":"0NHS09TV1tfY2drb3N3e3w==","3:U64":1,"4:NULL":null,"5:NULL":null,"6:NULL":null,"7:NULL":null}}
+
+# GroupKeyMap: group 1 -> keyset 66. List attributes need the wrapper object.
+matter esp controller write-attr <node> 0 0x003F 0x00 [{"0:ARR-OBJ":[{"1:U16":1,"2:U16":66}]}]
+
+# Groups cluster membership: makes the node join the Matter multicast address.
+lo-add-group <node> 1 0x0001 orchestra
+
+# Access Control: preserve commissioner CASE/Administer, add group 1 Group/Manage.
+matter esp controller write-attr <node> 0 0x001F 0x0000 [{"0:ARR-OBJ":[{"1:U8":5,"2:U8":2,"3:ARR-U64":[112233],"4:NULL":null},{"1:U8":4,"2:U8":3,"3:ARR-U64":[1],"4:ARR-OBJ":[{"0:U32":4294048768,"1:U16":1}]}]}]
+```
+
+Load-bearing ACL details:
+
+- `112233` is the controller node id `0x1B669`, preserved as CASE/Administer so
+  unicast admin remains usable.
+- The group ACL entry uses privilege `4` (Manage), auth mode `3` (Group), subject
+  `1`, and target cluster `0xFFF1FC00` on endpoint `1`.
+- For Access Control writes, the group subject on the wire is the **bare group
+  id** (`1`). `AclStorage` converts it internally to `chip::NodeIdFromGroupId(1)`;
+  writing `0xFFFFFFFFFFFF0001` directly would be the wrong payload shape.
+
+### Final Validation
+
+Node 2 ACL fix:
+
+```text
+lo-set-scene-group 0x0001 1 ff0000 0 40 12012
+chip[EM]: Received Groupcast Message with GroupId 0x0001 (1)
+esp_matter_command: Received command 0x00000000 for endpoint 0x0001's cluster 0xFFF1FC00
+lo_renderer: scene seq=12012 effect=1 rgb=255,0,0 speed=0 brightness=40 start=now
+```
+
+Node 3 was then provisioned with the same KeySetWrite, GroupKeyMap, AddGroup, and
+ACL sequence. A single group command reached and rendered on both nodes:
+
+```text
+lo-set-scene-group 0x0001 1 ffff00 0 40 12022
+
+node3: Received Groupcast Message with GroupId 0x0001 (1)
+node3: lo_renderer: scene seq=12022 effect=1 rgb=255,255,0 speed=0 brightness=40 start=now
+
+node2: Received Groupcast Message with GroupId 0x0001 (1)
+node2: lo_renderer: scene seq=12022 effect=1 rgb=255,255,0 speed=0 brightness=40 start=now
+```
+
+OpenThread still logs a late `Dropping rx frag frame ... offset:136` after the
+successful render. That is no longer the Phase 5 blocker: the first fragment is
+accepted, the Matter command is processed, and the renderer applies the scene.
+The remaining `Failed to send InvokeResponseMessage` is also post-render group
+invoke noise and did not block the physical result.
+
+### Bench State
+
+- Controller `0x1B669` on `/dev/cu.usbmodem11101`.
+- LED node 2 on `/dev/cu.usbmodem101`: group key/map, Groups membership, and ACL
+  installed; rendered group `seq=12022`.
+- LED node 3 on `/dev/cu.usbmodem11201`: group key/map, Groups membership, and
+  ACL installed; rendered group `seq=12022`.
+- S3+H2 BR still on the split topology; no venue Wi-Fi/backbone dependency.

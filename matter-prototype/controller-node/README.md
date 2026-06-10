@@ -48,7 +48,8 @@ required to render scenes.
   - `lo-scheduled-scene-group <group-id> <delay-ms> <effect-id> <rrggbb> <speed> <brightness> [sequence]`
   - `lo-show-group-help` — prints the one-time group key + enrollment sequence
   - Group keysets use the built-in `controller group-settings add-keyset/bind-keyset/add-group`.
-    The node-side group-key install is the hardware-gated step (see
+    Each node also needs Group Key Management state and an Access Control ACL
+    entry for the group subject; that node-side sequence is the hardware-gated step (see
     [`docs/console.md`](../../docs/console.md#one-time-group-key--enrollment-setup)).
 - **Offline OTA Provider scaffold (build-gated, `CONFIG_LED_ORCHESTRA_ENABLE_OTA_PROVIDER`,
   default off):** OTA Provider cluster on the root endpoint + `lo-ota-status`,

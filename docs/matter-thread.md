@@ -180,8 +180,9 @@ is what makes the SDK dispatch a groupcast; a bare small id on a unicast command
 targets a node instead. Enrollment is the standard Groups cluster (`0x0004`
 AddGroup, one unicast per endpoint); groupcast acceptance additionally requires
 group keys installed on the controller (`controller group-settings ...`) and on
-each node (Group Key Management `0x003F` KeySetWrite + GroupKeyMap). The node-side
-key install is the hardware-gated step; see
+each node (Group Key Management `0x003F` KeySetWrite + GroupKeyMap), plus an
+Access Control (`0x001F`) ACL entry authorizing group `0x0001` on the LED endpoint.
+The node-side key/map/membership/ACL sequence is the hardware-gated step; see
 [`console.md`](console.md#one-time-group-key--enrollment-setup). Distribute config
 unicast, then activate by group at a synchronized scheduled time.
 - **Border-router decision (resolved 2026-06-02).** A single native-Thread

@@ -145,8 +145,11 @@ cluster):
 - Group **keys** are required for groupcast to be accepted: the controller installs
   a keyset (`controller group-settings add-keyset/bind-keyset/add-group`) and each
   node gets the same key + a group→keyset map via the Group Key Management cluster
-  (`0x003F` KeySetWrite + GroupKeyMap). The node-side key install is the
-  hardware-gated step; see [`../../docs/console.md`](../../docs/console.md#one-time-group-key--enrollment-setup).
+  (`0x003F` KeySetWrite + GroupKeyMap). Each node also needs an Access Control
+  cluster (`0x001F`) ACL entry for group `0x0001`; otherwise the encrypted
+  groupcast is received but rejected with `AccessControl: denied`. The node-side
+  key/map/membership/ACL sequence is the hardware-gated step; see
+  [`../../docs/console.md`](../../docs/console.md#one-time-group-key--enrollment-setup).
   Do not claim group control works until every node renders one group `SetScene`.
 
 ## Program Bundles (Direction)

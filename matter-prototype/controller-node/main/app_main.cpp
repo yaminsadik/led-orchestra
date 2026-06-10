@@ -65,6 +65,7 @@ extern "C" void app_main()
     esp_log_level_set("lo_wifi_ingress", ESP_LOG_INFO);
     esp_log_level_set("lo_console", ESP_LOG_INFO);
     esp_log_level_set("lo_heap", ESP_LOG_INFO);
+    esp_log_level_set("groupsettings", ESP_LOG_INFO);
 
     // Keep the noisy wifi:/OPENTHREAD: drivers at WARN, but surface Matter
     // commissioning progress so `pairing ble-thread` is debuggable: BLE link,

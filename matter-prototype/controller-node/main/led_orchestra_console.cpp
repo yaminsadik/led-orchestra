@@ -432,18 +432,18 @@ int show_group_help_handler(int, char **)
     printf("    matter esp controller group-settings bind-keyset 0x%04X 0x%04X\n", g, ks);
     printf("    matter esp controller group-settings add-group   0x%04X orchestra\n", g);
     printf("\n");
-    printf("  Per node (after commissioning) — install the same key + map, then enroll the endpoint:\n");
+    printf("  Per node (after commissioning) — install the same key, group map, membership, and ACL:\n");
     printf("    matter esp controller invoke-cmd <node> 0 0x003F 0x00 \"<KeySetWrite GroupKeySetStruct>\"\n");
     printf("    matter esp controller write-attr <node> 0 0x003F 0x00 \"[{...GroupKeyMapStruct...}]\"\n");
     printf("    lo-add-group <node> %u 0x%04X orchestra\n", led_orchestra::matter::kEndpointIdHint, g);
+    printf("    matter esp controller write-attr <node> 0 0x001F 0x0000 \"<ACL with CASE admin + group subject>\"\n");
     printf("\n");
     printf("  Then drive every node with one command:\n");
     printf("    lo-set-scene-group 0x%04X <effect> <rrggbb> <speed> <brightness>\n", g);
     printf("    lo-sync-clock-group 0x%04X\n", g);
     printf("    lo-scheduled-scene-group 0x%04X <delay-ms> <effect> <rrggbb> <speed> <brightness>\n", g);
     printf("\n");
-    printf("  The node-side KeySetWrite/GroupKeyMap step is the part to confirm on hardware;\n");
-    printf("  see docs/console.md (Group Control) for the exact GroupKeySetStruct payload.\n");
+    printf("  See docs/console.md (Group Control) for exact KeySetWrite, GroupKeyMap, and ACL payloads.\n");
     printf("\n");
     return ESP_OK;
 }

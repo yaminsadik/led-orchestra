@@ -152,22 +152,34 @@ node need that key, and each node endpoint needs to be a group member. Run once:
    the Kubernetes control plane). `0x0001` is the application group id.
 
 2. Per node (after commissioning) — install the same key + group→keyset map on
-   the node via the **Group Key Management** cluster (`0x003F`), then enroll the
-   endpoint:
+   the node via the **Group Key Management** cluster (`0x003F`), enroll the
+   endpoint, then authorize group commands in the **Access Control** cluster
+   (`0x001F`):
 
    ```text
-   matter esp controller invoke-cmd <node> 0 0x003F 0x00 "<KeySetWrite GroupKeySetStruct>"
-   matter esp controller write-attr <node> 0 0x003F 0x00 "[{<GroupKeyMapStruct>}]"
+   matter esp controller invoke-cmd <node> 0 0x003F 0x00 {"0:OBJ":{"0:U16":66,"1:U8":0,"2:BYT":"0NHS09TV1tfY2drb3N3e3w==","3:U64":1,"4:NULL":null,"5:NULL":null,"6:NULL":null,"7:NULL":null}}
+   matter esp controller write-attr <node> 0 0x003F 0x00 [{"0:ARR-OBJ":[{"1:U16":1,"2:U16":66}]}]
    lo-add-group <node> 1 0x0001 orchestra
+   matter esp controller write-attr <node> 0 0x001F 0x0000 [{"0:ARR-OBJ":[{"1:U8":5,"2:U8":2,"3:ARR-U64":[112233],"4:NULL":null},{"1:U8":4,"2:U8":3,"3:ARR-U64":[1],"4:ARR-OBJ":[{"0:U32":4294048768,"1:U16":1}]}]}]
    ```
 
-   The KeySetWrite payload is the `GroupKeySetStruct` (keyset id `0x0042`, policy,
-   epoch key 0 = the same 16-byte key, epoch start time). The GroupKeyMap entry
-   maps group `0x0001` → keyset `0x0042`. **This node-side key install is the step
-   to confirm on hardware** — until every node holds the group key, a groupcast
-   `lo-set-scene-group` will not be accepted by the nodes (each node keeps its
-   last valid scene). Use direct per-node `lo-set-scene` until the group path is
-   verified end to end.
+   The node `KeySetWrite` payload is the `GroupKeySetStruct`: keyset `0x0042`,
+   TrustFirst policy, epoch key 0 = the same 16-byte key encoded as base64
+   (`d0d1…dedf` hex → `0NHS09TV1tfY2drb3N3e3w==`), and epoch start time `1`.
+   The `GroupKeyMap` entry maps group `0x0001` → keyset `0x0042`. For
+   `write-attr`, list attributes need the wrapper object
+   `[{"0:ARR-OBJ":[...]}]`.
+
+   The ACL write preserves the commissioner as a CASE/Administer subject
+   (`112233` = controller node `0x1B669`) and adds group `0x0001` as a
+   Group/Manage subject targeted at endpoint `1`, custom cluster `0xFFF1FC00`.
+   For Access Control writes, the group subject is the **bare group id** (`1`);
+   the stack converts it internally to `chip::NodeIdFromGroupId(1)`.
+
+   All four node-side steps are required. Without `KeySetWrite`/`GroupKeyMap`,
+   the node cannot decrypt/accept the groupcast. Without `lo-add-group`, it will
+   not join the Matter multicast address. Without the ACL entry, it receives the
+   groupcast but logs `AccessControl: denied` and keeps the last valid scene.
 
 3. Drive all nodes with one command: `lo-set-scene-group 0x0001 ...`.
 
