@@ -14,11 +14,12 @@ those role definitions (control plane vs. UI/operator ingress vs. Matter
 controller vs. Thread Border Router vs. RCP vs. OTA Provider/Requestor) apply
 throughout this document.
 
-The production controller/border-router topology is a validation-gated decision.
-**Amended 2026-06-06:** the primary target is the **S3+H2 one-board hub** (ESP32-S3
-Matter controller + esp-thread-br host + ESP32-H2 RCP), with the proven all-C6
-split and a Pi `ot-br-posix` as fallbacks. The canonical statement and the
-experiment that selects it are in
+The production controller/border-router topology was a validation-gated decision.
+**Resolved 2026-06-10:** the offline co-located **S3+H2 one-board hub failed**, so
+the selected architecture is the **split topology**:
+**S3+H2 board as BR-only + separate ESP32-C6 controller**, with a Pi
+`ot-br-posix` still available as a last fallback. The canonical statement and the
+experiment record are in
 [`controller-topology-adr.md`](controller-topology-adr.md) and
 [`controller-topology-validation.md`](controller-topology-validation.md).
 
@@ -67,14 +68,14 @@ stack are C++-native.
 - Acts as a **Matter OTA Requestor** in the OTA phase (downloads, verifies,
   decrypts, and applies images from the controller-node provider).
 
-### Controller Node (evolves into the Hub)
+### Controller Node
 
 The controller node is the Matter controller/commissioner in the private fabric
 and the local source of truth for scenes, node inventory, groups, and (later)
 OTA images. Hardware bring-up established it needs a real OpenThread Border
-Router, so under the amended decision it evolves into the **S3+H2 one-board hub**:
-Matter controller + esp-thread-br host on the **ESP32-S3** (with an on-board
-**ESP32-H2 RCP** for the radio) + a thin Kubernetes bundle gateway. See
+Router, and the one-board S3+H2 co-located controller path failed offline, so the
+selected architecture keeps the controller on its own **ESP32-C6** alongside an
+**S3+H2 BR-only** board. See
 [`controller-topology-adr.md`](controller-topology-adr.md).
 
 - Receives operator intent and OTA image bytes over USB serial or the controller

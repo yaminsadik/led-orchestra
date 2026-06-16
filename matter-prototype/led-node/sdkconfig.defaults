@@ -1,6 +1,9 @@
 # ESP32-C6 Matter-over-Thread LED node prototype target.
 CONFIG_IDF_TARGET="esp32c6"
-CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+# Deployment standard is ESP32-C6-WROOM-1-N8 (8 MB) — see
+# docs/led-node-flash-sizing-decision.md. For 4 MB (N4) units, set _4MB here and
+# point CONFIG_PARTITION_TABLE_CUSTOM_FILENAME back at partitions.csv.
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_LIBSODIUM_USE_MBEDTLS_SHA=y
 CONFIG_MBEDTLS_HKDF_C=y
 
@@ -24,19 +27,22 @@ CONFIG_ENABLE_EXTENDED_DISCOVERY=y
 CONFIG_ENABLE_WIFI_STATION=n
 
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-8mb.csv"
 
 CONFIG_ENABLE_CHIP_SHELL=y
 
 CONFIG_LED_ORCHESTRA_NODE_ID=1
 CONFIG_LED_ORCHESTRA_LED_GPIO=2
-# Bench strip budget. 300 is the Kconfig max; sized to light a full physical
-# strip (the ~150-LED WS2815 bench strip lit ~40% at the old 60-LED budget).
-# Set these to the exact physical LED count for tight rainbow spread + memory.
-CONFIG_LED_ORCHESTRA_LED_COUNT=300
+# LED_COUNT is the per-node renderer BUFFER CAP (max LEDs any single node can
+# drive), NOT a fleet-wide constant: the same firmware serves a 400-LED node and a
+# 600-LED node. Each node's actual count is provisioned at runtime via SetNodeConfig
+# (segment_len, persisted in NVS) and clamped to this cap (see renderer.cpp). Only
+# raise this value + the Kconfig `range` and rebuild if a node must drive MORE LEDs
+# than this. SEGMENT_*/TOTAL below are first-boot defaults until a node is provisioned.
+CONFIG_LED_ORCHESTRA_LED_COUNT=600
 CONFIG_LED_ORCHESTRA_SEGMENT_START=0
-CONFIG_LED_ORCHESTRA_SEGMENT_LENGTH=300
-CONFIG_LED_ORCHESTRA_TOTAL_LEDS=300
+CONFIG_LED_ORCHESTRA_SEGMENT_LENGTH=600
+CONFIG_LED_ORCHESTRA_TOTAL_LEDS=600
 
 # LED node is the Matter OTA Requestor: it pulls signed/encrypted images from
 # the hub OTA Provider over the offline Thread fabric (the OTA phase). Keep the

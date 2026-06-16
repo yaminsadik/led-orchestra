@@ -65,7 +65,7 @@ extern "C" void app_main()
     esp_log_level_set("lo_wifi_ingress", ESP_LOG_INFO);
     esp_log_level_set("lo_console", ESP_LOG_INFO);
     esp_log_level_set("lo_heap", ESP_LOG_INFO);
-    esp_log_level_set("groupsettings", ESP_LOG_INFO);
+    esp_log_level_set("groupsettings", ESP_LOG_WARN);
 
     // Keep the noisy wifi:/OPENTHREAD: drivers at WARN, but surface Matter
     // commissioning progress so `pairing ble-thread` is debuggable: BLE link,
@@ -77,14 +77,12 @@ extern "C" void app_main()
     esp_log_level_set("chip[BLE]", ESP_LOG_INFO);
     esp_log_level_set("chip[DL]", ESP_LOG_INFO);
 
-    // Surface Interaction-Model status + decoded responses so group-key bring-up
-    // (KeySetWrite/GroupKeyMap on cluster 0x003F) shows exact node status codes
-    // and attribute/command read-backs instead of opaque "Done". Lower back to
-    // WARN once group control is proven.
-    esp_log_level_set("chip[TOO]", ESP_LOG_INFO);
-    esp_log_level_set("chip[DMG]", ESP_LOG_INFO);
-    esp_log_level_set("chip[IM]", ESP_LOG_INFO);
-    esp_log_level_set("chip[ZCL]", ESP_LOG_INFO);
+    // Group bring-up no longer needs verbose IM/DataModel logs on every boot.
+    // Raise these temporarily when debugging KeySetWrite/GroupKeyMap/ACL issues.
+    esp_log_level_set("chip[TOO]", ESP_LOG_WARN);
+    esp_log_level_set("chip[DMG]", ESP_LOG_WARN);
+    esp_log_level_set("chip[IM]", ESP_LOG_WARN);
+    esp_log_level_set("chip[ZCL]", ESP_LOG_WARN);
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {

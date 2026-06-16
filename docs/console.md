@@ -86,6 +86,7 @@ ignores the RGB fields).
 lo-set-scene <node-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]
 lo-set-node-config <node-id> <endpoint-id> <orchestra-node-id> <segment-start> <segment-len> <total-leds> <led-gpio>
 lo-sync-clock <node-id> <endpoint-id> [controller-time-ms]
+lo-read-config <node-id> <endpoint-id>
 ```
 
 - `lo-set-scene` — **unicast** to one node. Set effect, RGB (6 hex digits),
@@ -94,6 +95,8 @@ lo-sync-clock <node-id> <endpoint-id> [controller-time-ms]
   switches at the synchronized start time (keep-last-valid; it does not blank
   while waiting). For a whole group use `lo-set-scene-group` (below) — a bare
   small id like `0x0001` here means **unicast node 1**, not a group.
+  Immediate scenes are persisted to NVS (`scene persisted ...` in the node log)
+  so the node resumes the correct visual after a power cycle.
 - `lo-set-node-config` — provision a node's segment layout and LED GPIO. Unicast
   only (do not send to a group). The node persists this in NVS and reloads it at
   boot (`config loaded from NVS ...` / `config persisted ...` in the node log);
@@ -101,6 +104,12 @@ lo-sync-clock <node-id> <endpoint-id> [controller-time-ms]
   boot.
 - `lo-sync-clock` — push the controller clock; defaults to the controller's
   current uptime in ms if `controller-time-ms` is omitted.
+- `lo-read-config` — read all LED Orchestra cluster attributes from a node in a
+  single ReadRequest (current effect, segment layout, GPIO, firmware version,
+  last-accepted sequence number). Results arrive asynchronously via `chip[TOO]`
+  log lines. Use after `lo-set-node-config` + power cycle to confirm the
+  persisted config loaded, or after `lo-set-scene` to verify the last sequence.
+  Example: `lo-read-config 0x1234 1`.
 
 The full field/tag contract lives in
 `matter-prototype/cluster/led-orchestra.md`.
@@ -151,16 +160,15 @@ node need that key, and each node endpoint needs to be a group member. Run once:
    is 32 hex chars (dev/test value only — production rotates real keys through
    the Kubernetes control plane). `0x0001` is the application group id.
 
-2. Per node (after commissioning) — install the same key + group→keyset map on
-   the node via the **Group Key Management** cluster (`0x003F`), enroll the
-   endpoint, then authorize group commands in the **Access Control** cluster
-   (`0x001F`):
+2. Per node (after commissioning) — use
+   [`matter-prototype/s3-h2-hub-validation/lo-provision-group-member`](/Users/sadikyamin/developer/led-orchestra/matter-prototype/s3-h2-hub-validation/lo-provision-group-member:1)
+   to print the exact commands, or run the equivalent sequence manually:
 
    ```text
    matter esp controller invoke-cmd <node> 0 0x003F 0x00 {"0:OBJ":{"0:U16":66,"1:U8":0,"2:BYT":"0NHS09TV1tfY2drb3N3e3w==","3:U64":1,"4:NULL":null,"5:NULL":null,"6:NULL":null,"7:NULL":null}}
    matter esp controller write-attr <node> 0 0x003F 0x00 [{"0:ARR-OBJ":[{"1:U16":1,"2:U16":66}]}]
    lo-add-group <node> 1 0x0001 orchestra
-   matter esp controller write-attr <node> 0 0x001F 0x0000 [{"0:ARR-OBJ":[{"1:U8":5,"2:U8":2,"3:ARR-U64":[112233],"4:NULL":null},{"1:U8":4,"2:U8":3,"3:ARR-U64":[1],"4:ARR-OBJ":[{"0:U32":4294048768,"1:U16":1}]}]}]
+   matter esp controller write-attr <node> 0 0x001F 0x0000 [{"0:ARR-OBJ":[{"1:U8":5,"2:U8":2,"3:ARR-U64":[112233],"4:NULL":null},{"1:U8":3,"2:U8":3,"3:ARR-U64":[1],"4:ARR-OBJ":[{"0:U32":4294048768,"1:U16":1}]}]}]
    ```
 
    The node `KeySetWrite` payload is the `GroupKeySetStruct`: keyset `0x0042`,
@@ -172,16 +180,21 @@ node need that key, and each node endpoint needs to be a group member. Run once:
 
    The ACL write preserves the commissioner as a CASE/Administer subject
    (`112233` = controller node `0x1B669`) and adds group `0x0001` as a
-   Group/Manage subject targeted at endpoint `1`, custom cluster `0xFFF1FC00`.
+   Group/Operate subject targeted at endpoint `1`, custom cluster `0xFFF1FC00`.
    For Access Control writes, the group subject is the **bare group id** (`1`);
-   the stack converts it internally to `chip::NodeIdFromGroupId(1)`.
+   the stack converts it internally to `chip::NodeIdFromGroupId(1)`. If the
+   controller node id differs on a given bench, change the CASE subject value or
+   use the helper's `--admin-node-id` flag.
 
    All four node-side steps are required. Without `KeySetWrite`/`GroupKeyMap`,
    the node cannot decrypt/accept the groupcast. Without `lo-add-group`, it will
    not join the Matter multicast address. Without the ACL entry, it receives the
    groupcast but logs `AccessControl: denied` and keeps the last valid scene.
 
-3. Drive all nodes with one command: `lo-set-scene-group 0x0001 ...`.
+3. Power-cycle at least one provisioned node, then confirm a single
+   `lo-set-scene-group 0x0001 ...` still drives it.
+
+4. Drive all nodes with one command: `lo-set-scene-group 0x0001 ...`.
 
 ## OTA Provider Commands (Phase 7, build-gated)
 

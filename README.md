@@ -14,22 +14,22 @@ operator ingress to the hub:
 ```text
 Kubernetes control plane (authors/validates/schedules program bundles)
   + USB / Wi-Fi (operator ingress)
-  -> S3+H2 hub board:
-       ESP32-S3 (Matter controller + esp-thread-br host + thin bundle gateway)
+  -> separate ESP32-C6 controller / commissioner
+  -> S3+H2 board as BR-only:
+       ESP32-S3 (esp-thread-br host)
        ESP32-H2 (802.15.4 RCP radio, on-PCB UART link)
   -> Thread/Matter mesh
   -> ESP32-C6 LED nodes (Thread-only renderers; store + render bundles)
 ```
 
-Kubernetes and the laptop/mobile are ingress only; the hub is the Matter
-controller/commissioner. LED nodes are controlled over Thread and never join
-Wi-Fi. A real OpenThread Border Router is required (confirmed on hardware). The
-**S3+H2 one-board hub** (Espressif ESP Thread BR board: ESP32-S3 host + ESP32-H2
-RCP) is the preferred, validation-gated production target — a **hypothesis until
-the hardware gates pass**; the proven all-C6 split is the fallback. See
+Kubernetes and the laptop/mobile are ingress only; the C6 controller is the
+Matter controller/commissioner. LED nodes are controlled over Thread and never
+join Wi-Fi. A real OpenThread Border Router is required (confirmed on hardware).
+The offline **S3+H2 one-board hub failed** its validation gate, so the selected
+architecture is the current split topology above. See
 [Architecture](docs/architecture.md#roles-and-responsibilities) for the role
 glossary and [the topology ADR](docs/controller-topology-adr.md) for the
-decision and its fallback ladder.
+decision and its retained fallbacks.
 
 The completed Rust WiFi/UDP Phase 1/2 implementation is archived on the
 `archive/rust-phase-2` branch. Keep `main` focused on the C++ Matter/Thread
@@ -40,21 +40,22 @@ prototype and later production path.
 | Path | What it is | Build target |
 | --- | --- | --- |
 | `matter-prototype/led-node/` | ESP-IDF/ESP-Matter LED node for one physical strip segment | `esp32c6` via ESP-IDF |
-| `matter-prototype/controller-node/` | ESP-IDF/ESP-Matter controller/commissioner; evolves into the S3+H2 hub (controller + esp-thread-br host) | `esp32c6` now; `esp32s3` hub |
+| `matter-prototype/controller-node/` | ESP-IDF/ESP-Matter controller/commissioner for the selected split topology | `esp32c6` |
 | `matter-prototype/common/` | Shared C++ constants for cluster ids, command ids, tags, and effect ids | included by both apps |
 | `matter-prototype/cluster/` | Human-readable LED Orchestra custom cluster contract | docs |
-| `matter-prototype/s3-h2-hub-validation/` | S3+H2 one-board hub runbooks + committed config (Stages A-F) | host + `esp32s3`/`esp32h2` |
+| `matter-prototype/s3-h2-hub-validation/` | Historical S3+H2 one-board validation runbooks + retained BR-only split-topology support | host + `esp32s3`/`esp32h2` |
 | `matter-prototype/stage0-br-validation/` | Stage 0 all-C6 BR runbook + evidence (Fallback-1) | host + `esp32c6` |
 
 ## Documentation
 
 - [Architecture](docs/architecture.md) — roles, topology, runtime flow, program
   distribution, and system invariants.
-- [Topology ADR](docs/controller-topology-adr.md) — the validation-gated
-  controller/border-router decision (S3+H2 hub primary; all-C6 split fallback).
+- [Topology ADR](docs/controller-topology-adr.md) — the resolved
+  controller/border-router decision (selected split topology, with retained
+  fallbacks).
 - [Topology validation](docs/controller-topology-validation.md) — the staged
-  experiment (and quantitative gate) that selects the S3+H2 hub, the all-C6
-  split, or the Pi fallback.
+  experiment record that rejected the one-board hub and selected the split
+  topology.
 - [Mesh network](docs/mesh-network.md) — Thread mesh topology, protocol stack,
   and the join/control sequence over 802.15.4.
 - [Debugging journal](docs/debugging-journal.md) — the discovery-timeout
@@ -145,7 +146,7 @@ idf.py set-target esp32c6
 idf.py build
 ```
 
-The **S3+H2 one-board hub** (primary target) builds from the stock esp-matter
+The historical **S3+H2 one-board validation** builds from the stock esp-matter
 examples with our committed overlays; see
 [matter-prototype/s3-h2-hub-validation/](matter-prototype/s3-h2-hub-validation/)
 (`build-s3-hub.sh`).
@@ -157,12 +158,10 @@ examples with our committed overlays; see
   - Apps build; controller boots and runs its operator AP; BLE commissioning
     completes PASE + `AddNOC`. Bring-up established that a single infra-less C6
     cannot self-resolve operational nodes → a real border router is required.
-- [~] **Phase 4 — Border-router topology validation** — Stage 0 (all-C6) PASSED
-  on hardware (2026-06-04). Amended 2026-06-06: the **S3+H2 one-board hub** is the
-  primary candidate. Run [the validation plan](docs/controller-topology-validation.md)
-  Stages A-F to select the S3+H2 hub, the all-C6 split, or Pi, and render a scene
-  through the hub's border router.
-- [ ] Phase 5 — Multi-node offline Thread mesh
+- [x] **Phase 4 — Border-router topology validation** — the offline one-board
+  S3+H2 hub failed; the selected architecture is **S3+H2 BR-only + separate C6
+  controller**.
+- [~] Phase 5 — Multi-node offline Thread mesh
 - [ ] Phase 6 — Segment config, synchronized FastLED effects, and program bundles
 - [ ] Phase 7 — Offline OTA through the hub
 - [ ] Phase 8 — Operator UX and Kubernetes control plane

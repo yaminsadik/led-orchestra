@@ -1,23 +1,22 @@
 # S3+H2 One-Board Hub Validation
 
-This package proves (or disproves) the **2026-06-06 architecture pivot**: that one
+This package records the **2026-06-06 one-board-hub validation attempt**: whether one
 **Espressif ESP Thread Border Router / Zigbee Gateway board** — an
 **ESP32-S3-WROOM-1** host + an **ESP32-H2-MINI-1** RCP — can be the complete LED
 Orchestra hub (Matter controller/commissioner **and** esp-thread-br host), driving
 Thread-only **ESP32-C6** LED nodes over Matter-over-Thread.
 
-One-board sufficiency is a **hypothesis until the hardware gates below pass.** Do
-not claim the board is the hub until the **Stage C** one-node end-to-end gate
-renders a scene on a physical LED. The proven all-C6 split
-([`../stage0-br-validation/`](../stage0-br-validation/)) is the fallback and stays
-intact as historical evidence.
+That one-board sufficiency hypothesis is now **closed as a failure for the
+offline product shape**: the decisive **Stage C** co-located gate failed. The
+board is retained in the project as a **BR-only companion board** inside the
+selected split topology, not as the active all-in-one hub.
 
 Decision context: [`../../docs/controller-topology-adr.md`](../../docs/controller-topology-adr.md)
 (the amended ladder) and
 [`../../docs/controller-topology-validation.md`](../../docs/controller-topology-validation.md)
 (the quantitative gate + the Stage A-F experiment this package runs).
 
-## Why one S3+H2 board (vs. the all-C6 hub)
+## Historical Why One S3+H2 Board Was Attractive
 
 - **Least wiring.** The S3↔H2 link is on the PCB — no breadboard spinel crossover
   like the Stage 0 all-C6 BR.
@@ -110,13 +109,13 @@ the running BR exposes `matter esp ot_cli ...`.
 Serial capture: reuse [`../stage0-br-validation/tools/serlog.py`](../stage0-br-validation/tools/serlog.py)
 and [`../stage0-br-validation/tools/sercap.py`](../stage0-br-validation/tools/sercap.py).
 
-## Stages (gated; work in order)
+## Stages (historical record)
 
 | Stage | Runbook | Gate (one line) |
 | --- | --- | --- |
 | **A** | [`stage-a-inventory.md`](stage-a-inventory.md) | Hardware/toolchain matrix written; flashing path understood; examples build on the pinned toolchain |
 | **B** | [`stage-b-br-baseline.md`](stage-b-br-baseline.md) | A *separate* C6 client resolves the LED through the S3+H2 BR; CASE + `SetScene` render; no Error 28/32 |
-| **C** | [`stage-c-onehub.md`](stage-c-onehub.md) | The S3 commissions a C6 LED, resolves it through **its own** BR, CASE, `SetScene` renders (the decisive one-board gate) |
+| **C** | [`stage-c-onehub.md`](stage-c-onehub.md) | The S3 commissions a C6 LED, resolves it through **its own** BR, CASE, `SetScene` renders (the decisive one-board gate) — **FAILED offline 2026-06-09** |
 | **D** | [`stage-d-recovery.md`](stage-d-recovery.md) | 100% recovery over the agreed cycle count; no short-run heap drift |
 | **E** | [`stage-e-scale-soak.md`](stage-e-scale-soak.md) | Group `SetScene` to ~20 nodes; 72 h soak within the metric targets |
 | **F** | [`stage-f-ingress.md`](stage-f-ingress.md) | Thin K8s/USB/Wi-Fi ingress added; all Stage D/E metrics still pass |
@@ -129,12 +128,18 @@ one-board hub gate):
 | [`phase-5-6-7-bench-runbook.md`](phase-5-6-7-bench-runbook.md) | Bench walkthrough: commission 3→20 nodes, verify real **group control**, durable NVS config, and synchronized **scheduled group** scenes. |
 | [`phase-7-offline-ota.md`](phase-7-offline-ota.md) | Offline Matter OTA: requestor (present) + provider scaffold (build-gated), the remaining offline image plumbing, and the field-security layer. |
 
-## Working split (until the board is proven)
+## Working Split (selected architecture)
+
+The active hardware path is the split topology:
+
+```text
+ESP32-C6 controller + S3+H2 board as BR-only + C6 LED nodes
+```
 
 The host author prepares docs, runbooks, committed overlays/scripts, and verifies
 host builds (`idf.py build` for S3/H2). The **operator flashes hardware and runs
-the gates**, pasting serial logs + observed LED results to be recorded as evidence
-in the per-stage runbook and in
+the retained BR-only / split-topology work**, pasting serial logs + observed LED
+results to be recorded as evidence in the per-stage runbook and in
 [`../../docs/controller-topology-validation.md`](../../docs/controller-topology-validation.md).
 Anything that fails in a way future work should remember goes in
 [`../../docs/debugging-journal.md`](../../docs/debugging-journal.md).

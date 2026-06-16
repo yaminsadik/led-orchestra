@@ -31,3 +31,15 @@ esp_err_t led_orchestra_config_load(LedOrchestraNodeConfig &out, bool &from_nvs)
 // Persist node config durably to NVS (magic + version + CRC wrapped). Called
 // after a SetNodeConfig command is accepted so the layout survives reboot.
 esp_err_t led_orchestra_config_save(const LedOrchestraNodeConfig &config);
+
+// Load the last persisted active scene from NVS. Same semantics as
+// led_orchestra_config_load: on miss or integrity failure fills `out` with a
+// safe default and sets `from_nvs` false. Scheduled scenes are NOT persisted
+// (only immediate/active scenes are); this always reflects the last scene that
+// was concretely activated on the node.
+esp_err_t led_orchestra_scene_load(LedOrchestraScene &out, bool &from_nvs);
+
+// Persist the active scene durably to NVS. Called after an immediate SetScene
+// is accepted (scheduled_start_ms == 0) so the node resumes the correct scene
+// after a power cycle without re-provisioning from the controller.
+esp_err_t led_orchestra_scene_save(const LedOrchestraScene &scene);

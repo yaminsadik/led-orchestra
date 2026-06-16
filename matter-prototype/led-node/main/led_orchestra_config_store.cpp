@@ -79,6 +79,69 @@ bool record_is_sane(const ConfigRecord &record)
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Scene store — persists the last *immediate* (non-scheduled) active scene.
+// Shares the "lo_cfg" NVS namespace; scene record uses a different key.
+// ---------------------------------------------------------------------------
+
+constexpr char kSceneKey[] = "scene";
+
+// 'L''E''D''N' (scene mnemonic: N = "now").
+constexpr uint32_t kSceneMagic = 0x4C45444E;
+constexpr uint16_t kSceneVersion = 1;
+
+struct __attribute__((packed)) SceneRecord {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t reserved;
+    uint8_t effect;
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+    uint8_t speed;
+    uint8_t brightness;
+    uint8_t pad[2];
+    uint32_t sequence;
+    uint32_t crc32;
+};
+
+static_assert(sizeof(SceneRecord) == 24, "SceneRecord layout changed");
+
+uint32_t scene_record_crc(const SceneRecord &r)
+{
+    return esp_rom_crc32_le(0, reinterpret_cast<const uint8_t *>(&r), offsetof(SceneRecord, crc32));
+}
+
+LedOrchestraScene scene_defaults()
+{
+    // Mirrors g_scene default in led_orchestra_renderer.cpp; kept in sync with
+    // the compiled initial scene so a clean boot and a post-power-cycle boot
+    // with no persisted scene are indistinguishable.
+    return LedOrchestraScene{
+        .effect = 2, // rainbow
+        .red = 0, .green = 0, .blue = 0,
+        .speed = 128, .brightness = 40,
+        .sequence = 0, .scheduled_start_ms = 0,
+    };
+}
+
+bool scene_record_is_sane(const SceneRecord &r)
+{
+    if (r.magic != kSceneMagic) {
+        ESP_LOGW(TAG, "stored scene magic mismatch (0x%08" PRIX32 ")", r.magic);
+        return false;
+    }
+    if (r.version != kSceneVersion) {
+        ESP_LOGW(TAG, "stored scene version %u unsupported (expected %u)", r.version, kSceneVersion);
+        return false;
+    }
+    if (r.crc32 != scene_record_crc(r)) {
+        ESP_LOGW(TAG, "stored scene CRC mismatch — ignoring");
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 esp_err_t led_orchestra_config_load(LedOrchestraNodeConfig &out, bool &from_nvs)
@@ -172,5 +235,93 @@ esp_err_t led_orchestra_config_save(const LedOrchestraNodeConfig &config)
 
     ESP_LOGI(TAG, "config persisted: node=%u segment=[%u,%u) total=%u gpio=%u", config.node_id, config.segment_start,
              config.segment_start + config.segment_len, config.total_leds, config.led_gpio);
+    return ESP_OK;
+}
+
+esp_err_t led_orchestra_scene_load(LedOrchestraScene &out, bool &from_nvs)
+{
+    out = scene_defaults();
+    from_nvs = false;
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(kNamespace, NVS_READONLY, &handle);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "no persisted scene namespace yet; using scene defaults");
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_open for scene failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    SceneRecord record = {};
+    size_t size = sizeof(record);
+    err = nvs_get_blob(handle, kSceneKey, &record, &size);
+    nvs_close(handle);
+
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "no persisted scene record yet; using scene defaults");
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_get_blob(scene) failed: %s; using scene defaults", esp_err_to_name(err));
+        return ESP_OK;
+    }
+    if (size != sizeof(record) || !scene_record_is_sane(record)) {
+        ESP_LOGW(TAG, "persisted scene unusable; using scene defaults");
+        return ESP_OK;
+    }
+
+    out = LedOrchestraScene{
+        .effect = record.effect,
+        .red = record.red,
+        .green = record.green,
+        .blue = record.blue,
+        .speed = record.speed,
+        .brightness = record.brightness,
+        .sequence = record.sequence,
+        .scheduled_start_ms = 0, // never restore a scheduled-start deadline
+    };
+    from_nvs = true;
+    return ESP_OK;
+}
+
+esp_err_t led_orchestra_scene_save(const LedOrchestraScene &scene)
+{
+    SceneRecord record = {};
+    record.magic = kSceneMagic;
+    record.version = kSceneVersion;
+    record.reserved = 0;
+    record.effect = scene.effect;
+    record.red = scene.red;
+    record.green = scene.green;
+    record.blue = scene.blue;
+    record.speed = scene.speed;
+    record.brightness = scene.brightness;
+    record.pad[0] = 0;
+    record.pad[1] = 0;
+    record.sequence = scene.sequence;
+    record.crc32 = scene_record_crc(record);
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(kNamespace, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_open(rw) for scene failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = nvs_set_blob(handle, kSceneKey, &record, sizeof(record));
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "failed to persist scene: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "scene persisted: effect=%u rgb=%u,%u,%u speed=%u brightness=%u seq=%" PRIu32,
+             scene.effect, scene.red, scene.green, scene.blue, scene.speed, scene.brightness, scene.sequence);
     return ESP_OK;
 }

@@ -4,12 +4,13 @@ This roadmap turns the project phases into acceptance criteria. A phase is done
 when the listed behavior works on real ESP32-C6 hardware or, for host-only
 pieces, through a repeatable local command.
 
-The production controller/border-router topology is locked as a validation-gated
+The production controller/border-router topology was a validation-gated
 decision; see [`controller-topology-adr.md`](controller-topology-adr.md) and
 [`controller-topology-validation.md`](controller-topology-validation.md).
-**Amended 2026-06-06:** "Hub" below means the **S3+H2 one-board hub** (Matter
-controller + esp-thread-br host on the ESP32-S3 + ESP32-H2 RCP + thin Kubernetes
-gateway); the all-C6 split is the proven fallback.
+**Resolved 2026-06-10:** the offline co-located **S3+H2 one-board hub failed**
+its validation gate, so the selected architecture is the **split topology**:
+**S3+H2 board as BR-only + separate ESP32-C6 controller/commissioner + C6 LED
+nodes**.
 
 ## Phase 1: One ESP32-C6 Drives One Strip
 
@@ -67,46 +68,38 @@ scene through a real border router.
 
 ## Phase 4: Border-Router Topology Validation
 
-Status: **in progress — Stage 0 (all-C6) PASSED on hardware (2026-06-04). Amended
-2026-06-06: the S3+H2 one-board hub is now the primary candidate; Stages A-F next.**
-This phase runs
-[`controller-topology-validation.md`](controller-topology-validation.md) and
-selects the S3+H2 hub, the all-C6 split, or the Pi fallback.
+Status: **done — topology selected on hardware (2026-06-10).** The offline
+co-located S3+H2 one-board hub failed Stage C; the project selected the proven
+**split topology**:
+**S3+H2 BR-only + separate ESP32-C6 controller**. This phase ran
+[`controller-topology-validation.md`](controller-topology-validation.md) to
+decide the controller/border-router architecture.
 
 Goal: prove operational discovery and end-to-end control work through a real
-OpenThread Border Router, and decide where the controller co-locates.
+OpenThread Border Router, then select the controller/border-router split that
+actually works on hardware.
 
 Acceptance criteria (quantitative — see the validation doc for thresholds):
 
-- **Stage 0 (all-C6, primary go/no-go for the fallback) — [PASSED 2026-06-04]:**
-  a *separate* Thread client resolved an LED node's `_matter._tcp` record through
-  the BR (host + RCP) — not the BR resolving its own record. `dns browse` returned
-  the record instead of `Error 28`, and operational CASE then completed (a
-  `SetScene` rendered) once the commissioner's Wi-Fi softAP was dropped to clear
-  single-radio contention.
-- **S3+H2 hub (primary target), Stages A-F:** inventory/toolchain (A); S3+H2 as a
-  BR-only baseline resolving for the separate C6 client (B); the **one-node
-  end-to-end gate** where the co-located S3 commissions one C6 LED, resolves it
-  through its own H2-backed BR, and renders `SetScene` over the custom cluster
-  (C); repeatability/recovery (D); ~20-node scale + ≥ 72 h soak (E); thin ingress
-  last (F).
-- Metrics hold at ~20-node scale and through a ≥ 72 h soak with ≥ 20 hard power
-  cycles: min free heap, largest free block, no heap drift, 100% reboot recovery
-  and discovery, flash headroom (the S3+H2 board is 8 MB + 2 MB PSRAM).
-- A thin Kubernetes bundle gateway is added last and all metrics still pass.
+- A real border router is mandatory; the infra-less single-C6 path is ruled out.
+- The **selected topology** proves discovery + operational CASE + physical render
+  through a real BR:
+  **S3+H2 BR-only + separate C6 controller + C6 LED nodes**.
+- The offline co-located **S3+H2 one-board hub failed** the decisive Stage C
+  gate, so it is not the active architecture.
+- Recovery and later scale/soak work continue on the selected split topology.
 
-Decision mapping:
+Decision result:
 
 ```text
-Stage 0 (all-C6 split) PASSED 2026-06-04 (discovery + operational CASE).
-S3+H2 hub Stages A-F PASS within headroom -> S3+H2 one-board hub  [primary target]
-S3+H2 hub FAILS (one-board discovery OR heap/stability) -> all-C6 split (= Stage 0 config)
-C6/H2 esp-thread-br path itself not stable -> Pi / ot-br-posix
+S3+H2 BR-only baseline (Stage B) PASSED 2026-06-08
+S3+H2 one-board hub (Stage C) FAILED offline 2026-06-09
+Selected architecture 2026-06-10 -> S3+H2 BR-only + separate C6 controller
 ```
 
 ## Phase 5: Multi-Node Offline Thread Mesh
 
-Status: **two-node groupcast gate passed on the split topology (2026-06-10).** Real
+Status: **three-node groupcast gate passed on the selected split topology (2026-06-10).** Real
 Matter group control is implemented and hardware-proven on LED nodes 2/3 —
 `lo-add-group` (Groups cluster AddGroup),
 `lo-set-scene-group` / `lo-sync-clock-group` / `lo-scheduled-scene-group` (group
@@ -131,16 +124,21 @@ Acceptance criteria:
 
 ## Phase 6: Segment Config, Synchronized Effects, And Program Bundles
 
-Status: **core firmware landed; hardware gate + bundle transport pending.**
-Durable NVS `NodeConfig` (versioned, CRC, load-and-log at boot), scheduled
+Status: **firmware complete; hardware gate pending.**
+All Phase 6 firmware is in place: durable NVS `NodeConfig` (versioned, CRC,
+load-and-log at boot), durable NVS scene persistence (last active scene survives
+power cycle — `scene persisted ...` / `scene loaded from NVS ...`), scheduled
 `SetScene` with keep-last-valid promotion at the synchronized start time, the
-`lo-scheduled-scene-group` convenience command, and the FastLED-shaped
-effect/color engine + append-only effect metadata registry are implemented and
-build. The declarative bundle *format* and on-Thread transport remain open by
+`lo-scheduled-scene-group` convenience command, `lo-sync-clock-group`, the
+FastLED-shaped effect/color engine + append-only effect metadata registry, and
+`lo-read-config` (unicast ReadRequest to query all cluster attributes from a
+node). The declarative bundle *format* and on-Thread transport remain open by
 design (see the effect-management decision below and `architecture.md`); the code
 boundaries (commands append-only, bundles-are-data, distribute-then-activate) are
-in place. Not gated until multi-node hardware confirms synchronized scheduled
-group activation.
+in place. **Hardware gate:** multi-node hardware proof of synchronized scheduled
+group activation (lo-sync-clock-group → lo-scheduled-scene-group → all nodes
+flip at the same time) and durable config round-trip (lo-set-node-config →
+power-cycle → lo-read-config confirms NVS values) will close this phase.
 
 Goal: make the hub the source of truth for node config, effect timing, and the
 distribution of declarative program bundles.

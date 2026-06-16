@@ -11,6 +11,7 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <esp_matter_controller_cluster_command.h>
+#include <esp_matter_controller_read_command.h>
 
 #include <lib/core/NodeId.h>
 
@@ -418,6 +419,59 @@ int scheduled_scene_group_handler(int argc, char **argv)
                        json);
 }
 
+// lo-read-config <node-id> <endpoint-id>
+// Read all LED Orchestra cluster attributes from a single LED node in one
+// ReadRequest and print them. Useful for verifying durable config (segment
+// layout, GPIO), firmware version, current effect, and last-accepted sequence
+// after a power-cycle or commissioning. The framework prints each attribute
+// value when the response arrives (chip[TOO] tag at INFO level).
+int read_config_handler(int argc, char **argv)
+{
+    argc--;
+    argv++;
+
+    if (argc != 2) {
+        ESP_LOGE(TAG, "usage: lo-read-config <node-id> <endpoint-id>");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint64_t node_id = 0;
+    uint16_t endpoint = 0;
+    if (!parse_u64(argv[0], node_id) || !parse_u16(argv[1], endpoint)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Batch all 7 LED Orchestra cluster attributes into a single ReadRequest
+    // so only one CASE session is established. Results arrive asynchronously
+    // and are printed by the framework (chip[TOO] tag).
+    constexpr size_t kNumAttrs = 7;
+    using chip::Platform::ScopedMemoryBufferWithSize;
+    ScopedMemoryBufferWithSize<uint16_t> endpoints;
+    ScopedMemoryBufferWithSize<uint32_t> clusters;
+    ScopedMemoryBufferWithSize<uint32_t> attrs;
+
+    if (!endpoints.Alloc(kNumAttrs) || !clusters.Alloc(kNumAttrs) || !attrs.Alloc(kNumAttrs)) {
+        ESP_LOGE(TAG, "lo-read-config: allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
+
+    for (size_t i = 0; i < kNumAttrs; i++) {
+        endpoints[i] = endpoint;
+        clusters[i] = static_cast<uint32_t>(led_orchestra::matter::kClusterId);
+    }
+    attrs[0] = led_orchestra::matter::attribute::kCurrentScene;
+    attrs[1] = led_orchestra::matter::attribute::kSegmentStart;
+    attrs[2] = led_orchestra::matter::attribute::kSegmentLength;
+    attrs[3] = led_orchestra::matter::attribute::kTotalLeds;
+    attrs[4] = led_orchestra::matter::attribute::kLedGpio;
+    attrs[5] = led_orchestra::matter::attribute::kFirmwareVersion;
+    attrs[6] = led_orchestra::matter::attribute::kLastSequence;
+
+    ESP_LOGI(TAG, "reading LED Orchestra cluster 0x%" PRIX32 " on node 0x%" PRIX64 " endpoint %u (%zu attrs)",
+             led_orchestra::matter::kClusterId, node_id, endpoint, kNumAttrs);
+    return esp_matter::controller::send_read_attr_command(node_id, endpoints, clusters, attrs);
+}
+
 // lo-show-group-help — print the one-time group-enablement sequence so the
 // operator does not have to reconstruct the Matter group key dance from memory.
 int show_group_help_handler(int, char **)
@@ -443,7 +497,8 @@ int show_group_help_handler(int, char **)
     printf("    lo-sync-clock-group 0x%04X\n", g);
     printf("    lo-scheduled-scene-group 0x%04X <delay-ms> <effect> <rrggbb> <speed> <brightness>\n", g);
     printf("\n");
-    printf("  See docs/console.md (Group Control) for exact KeySetWrite, GroupKeyMap, and ACL payloads.\n");
+    printf("  See docs/console.md or matter-prototype/s3-h2-hub-validation/lo-provision-group-member\n");
+    printf("  for exact KeySetWrite, GroupKeyMap, AddGroup, and least-privilege ACL commands.\n");
     printf("\n");
     return ESP_OK;
 }
@@ -516,6 +571,14 @@ esp_err_t led_orchestra_console_register_commands()
         .func = &show_group_help_handler,
     };
     ESP_RETURN_ON_ERROR(esp_console_cmd_register(&show_group_help), TAG, "failed to register lo-show-group-help");
+
+    const esp_console_cmd_t read_config = {
+        .command = "lo-read-config",
+        .help = "Read all LED Orchestra cluster attrs from a node: <node-id> <endpoint-id>",
+        .hint = nullptr,
+        .func = &read_config_handler,
+    };
+    ESP_RETURN_ON_ERROR(esp_console_cmd_register(&read_config), TAG, "failed to register lo-read-config");
 
     return ESP_OK;
 }

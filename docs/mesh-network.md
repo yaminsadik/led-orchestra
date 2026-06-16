@@ -19,13 +19,13 @@ SRP record but cannot answer its own DNS-SD query, so operational discovery time
 out. The mesh therefore needs a real **OpenThread Border Router** that owns the
 Thread network and DNS-SD.
 
-The preferred target is the **S3+H2 one-board hub**: an **ESP32-S3** that
-co-locates the Matter controller and the esp-thread-br host, with an on-board
-**ESP32-H2 RCP** for the 802.15.4 radio. The diagram below shows that shape.
-Fallbacks split those roles onto separate C6s (the proven all-C6 Stage 0 split)
-or use a Linux/Pi `ot-br-posix` — the mesh roles are the same, only where they run
-differs. See [`controller-topology-adr.md`](controller-topology-adr.md) for the
-validation-gated ladder, and [`debugging-journal.md`](debugging-journal.md) /
+The selected topology is the **split architecture**: a **separate ESP32-C6
+controller** plus the **S3+H2 board used as BR-only** (ESP32-S3 esp-thread-br
+host + ESP32-H2 RCP). The offline one-board S3+H2 hub failed its co-located
+gate. The older all-C6 Stage 0 split and a Linux/Pi `ot-br-posix` remain deeper
+fallbacks — the mesh roles are the same, only where they run differs. See
+[`controller-topology-adr.md`](controller-topology-adr.md) for the resolved
+decision, and [`debugging-journal.md`](debugging-journal.md) /
 [`console.md`](console.md#ble-thread-pairing-requirement) for the evidence.
 
 ```mermaid
@@ -34,10 +34,12 @@ flowchart TB
         laptop["Laptop / phone / Kubernetes<br/>operator intent + bundles + OTA bytes"]
     end
 
-    subgraph hub["S3+H2 one-board hub (primary target)"]
-        ctrl["ESP32-S3: Matter commissioner / controller<br/>+ esp-thread-br host<br/>Thread Leader · SRP server · DNS-SD / mDNS proxy<br/>fabric 112233 · node 1"]:::ctrl
+    ctrl["ESP32-C6: Matter commissioner / controller<br/>fabric 112233 · node 0x1B669"]:::ctrl
+
+    subgraph hub["S3+H2 BR-only companion board"]
+        br["ESP32-S3: esp-thread-br host<br/>Thread Leader · SRP server · DNS-SD / mDNS proxy"]:::ctrl
         rcp["ESP32-H2<br/>802.15.4 RCP radio"]:::infra
-        ctrl -->|"UART / SPI (on-PCB)"| rcp
+        br -->|"UART / SPI (on-PCB)"| rcp
     end
 
     subgraph mesh["Thread mesh — IEEE 802.15.4 · IPv6 · offline (no internet)"]
@@ -53,6 +55,7 @@ flowchart TB
     strip3["WS2812B segment C<br/>global LEDs 120-179"]:::strip
 
     laptop -->|"USB serial / Wi-Fi / MQTT"| ctrl
+    ctrl --- br
     rcp <--> led1
     rcp <--> led2
     ctrl -.->|"BLE — commissioning only, once per node"| led1
@@ -85,11 +88,11 @@ Reading the diagram:
 - **Each LED node renders one contiguous segment** of the single virtual strip;
   see [`architecture.md`](architecture.md#runtime-model). The installation
   scales to ~20 nodes — A/B/C are representative.
-- **Fallback views.** Option 3 splits the Hub into a separate controller C6 and a
-  separate BR-host C6 — both Thread nodes on this same mesh, with the controller
-  joining over its own 802.15.4 radio and resolving through the BR. Option 4
-  replaces the C6 border router with a Linux/Pi `ot-br-posix`. Mesh roles are
-  identical; only where they run differs. See
+- **Fallback views.** The historical Stage 0 all-C6 split uses a separate
+  controller C6 and a separate BR-host C6 — both Thread nodes on this same mesh,
+  with the controller joining over its own 802.15.4 radio and resolving through
+  the BR. Option 4 replaces the border router with a Linux/Pi `ot-br-posix`.
+  Mesh roles are identical; only where they run differs. See
   [`controller-topology-adr.md`](controller-topology-adr.md).
 
 ## Virtual Strip On The Mesh

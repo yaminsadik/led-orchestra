@@ -1528,3 +1528,116 @@ invoke noise and did not block the physical result.
 - LED node 3 on `/dev/cu.usbmodem11201`: group key/map, Groups membership, and
   ACL installed; rendered group `seq=12022`.
 - S3+H2 BR still on the split topology; no venue Wi-Fi/backbone dependency.
+
+## 2026-06-15 — 600-LED Solid Color Flicker: Static Scenes Were Over-Refreshing
+
+### Symptom
+
+After extending one LED node from a 300-LED physical budget to 600 LEDs, a
+groupcast solid-blue scene did not stay visually uniform. Some pixels twitched,
+some showed different colors, and sections farther along the strip were dim red
+or random red/green/blue. When the LED node/data source was unplugged from the
+strip, the LEDs held the last blue frame and became visually stable.
+
+### Architecture At The Time
+
+- Split selected topology: S3+H2 border-router-only board, separate ESP32-C6
+  controller, and Thread-only ESP32-C6 LED node.
+- The LED node was confirmed on `/dev/cu.usbmodem11301` with
+  `led_orchestra_matter_led_node` firmware.
+- Durable node config had been updated to `segment=[0,600) total=600 gpio=2`.
+- Firmware defaults and Kconfig had been raised from the old 300-LED ceiling to
+  `CONFIG_LED_ORCHESTRA_LED_COUNT=600`,
+  `CONFIG_LED_ORCHESTRA_SEGMENT_LENGTH=600`, and
+  `CONFIG_LED_ORCHESTRA_TOTAL_LEDS=600`.
+
+### What Worked
+
+The Matter path was healthy. The controller sent group commands successfully:
+
+```text
+lo-set-scene-group 0x0001 1 0000ff 0 60
+lo_console: invoke destination=0xFFFFFFFFFFFF0001 (group) endpoint=1 cluster=0xFFF1FC00 command=0x0 ...
+Done
+```
+
+The LED node booted the expected firmware and strip budget:
+
+```text
+lo_renderer: config loaded from NVS: node=1 segment=[0,600) total=600 gpio=2
+lo_renderer: renderer started: gpio=2 leds=600
+```
+
+The strip itself could hold a stable blue frame when the data source stopped
+driving it, which narrowed the fault away from "bad stored pixel state" and
+toward repeated data refresh, signal integrity, timing, or power/noise coupling.
+
+### What Failed
+
+Before the renderer change, static effects were refreshed at the same cadence as
+animated effects:
+
+```text
+static constexpr TickType_t kFrameDelay = pdMS_TO_TICKS(16);
+...
+led_strip_refresh(g_strip);
+vTaskDelay(kFrameDelay);
+```
+
+For a solid scene this re-sent all 600 pixels at roughly 60 FPS even though the
+frame content did not change. On the bench wiring, each refresh was another
+opportunity for marginal data timing/noise to corrupt a bit and make the strip
+twitch.
+
+Opening serial monitors also caused the USB device to reset/re-enumerate during
+some tests (`Device not configured`), so logs alone could not prove a pure
+software fault. The decisive observation was physical: unplugging the data source
+left the latched blue frame stable.
+
+### Hypotheses And Experiments
+
+| Hypothesis | Experiment | Result |
+| --- | --- | --- |
+| Voltage drop at 600 LEDs caused color shift | Reduced blue brightness from full to `60` and asked for far-end voltage checks | Lower brightness reduced stress but did not fully explain stability after data unplug |
+| Matter groupcast was not reaching the node | Watched controller command output and LED boot/config logs | Controller returned `Done`; node had correct firmware/config |
+| Firmware still rendered only 300 LEDs | Raised Kconfig/defaults/sdkconfig to 600 and reflashed | Boot log changed to `renderer started: gpio=2 leds=600`; flicker remained |
+| Repeated data refresh of an unchanged solid frame was exposing marginal data timing | Changed static effects to render once and hold the latched frame | Solid blue became stable while the node stayed plugged in |
+
+### Decisive Evidence
+
+After the diagnostic renderer change, the LED node logged:
+
+```text
+lo_renderer: static scene rendered once; holding latched frame effect=1 seq=1
+```
+
+With that firmware, the same solid-blue group command stayed stable on hardware.
+That matches the earlier unplug test: the WS281x/WS2815-style strip holds the
+last latched frame correctly when the data line stops carrying repeated frames.
+
+### Resolution
+
+`matter-prototype/led-node/main/led_orchestra_renderer.cpp` now treats static
+effects (`off` and `solid`, based on effect metadata `scrolls == false`) as
+one-shot frames. The render task writes and refreshes the strip once, then polls
+for scene/config/policy changes without re-sending pixel data. Animated effects
+such as rainbow, Fibonacci, and aurora-breathe continue to refresh on the normal
+frame cadence.
+
+### Lessons
+
+- Static LED scenes should not be refreshed continuously unless there is a clear
+  hardware reason to do so. The strip latch is the stable state holder.
+- "Unplug data and it becomes stable" is strong evidence that repeated data
+  frames, data timing, or signal integrity are involved.
+- Long 600-LED bench runs should still use proper electrical hygiene: short data
+  lead, shared ground, series data resistor, adequate power injection, and a
+  5V-tolerant level shifter such as `74AHCT125` if the 3.3V data margin is poor.
+
+### Follow-Up
+
+- Keep animated-effect testing separate from static-scene validation, because
+  animation still requires continuous refresh and can still expose data-line or
+  power-injection issues.
+- If animated effects twitch on long strips, test lower frame rate, RMT timing
+  tolerance, level shifting, and data-wire routing before changing Matter logic.

@@ -13,12 +13,12 @@ running without it. The word "controller" is easy to overload, so see
 between the control plane, the Matter controller, the Thread Border Router, the
 RCP radio, and the LED nodes.
 
-The production controller/border-router topology is a **validation-gated**
+The production controller/border-router topology was a **validation-gated**
 decision; the canonical statement lives in
 [`controller-topology-adr.md`](controller-topology-adr.md) and the experiment
 that decides it in
 [`controller-topology-validation.md`](controller-topology-validation.md). This
-file describes the system those documents converge on.
+file describes the system those documents converged on.
 
 ## Project Layout
 
@@ -26,7 +26,7 @@ file describes the system those documents converge on.
 | --- | --- |
 | `matter-prototype/` | ESP-IDF/ESP-Matter lane for Thread LED nodes, the controller, the custom cluster, and offline OTA. |
 | `matter-prototype/led-node/` | C++ LED-node app: exposes the LED Orchestra custom cluster and renders one strip segment. |
-| `matter-prototype/controller-node/` | C++ controller/commissioner app; evolves into the **S3+H2 hub** (Matter controller + esp-thread-br host on the ESP32-S3, ESP32-H2 RCP). |
+| `matter-prototype/controller-node/` | C++ controller/commissioner app for the **separate ESP32-C6 controller** used in the selected split topology. |
 | `matter-prototype/common/` | Shared C++ constants for the custom cluster and effect ids. |
 | `matter-prototype/cluster/` | Human-readable custom-cluster contract. |
 | `matter-prototype/s3-h2-hub-validation/` | S3+H2 one-board hub runbooks + committed config (the primary hub validation; Stages A-F). |
@@ -47,8 +47,8 @@ code or docs.
 | --- | --- | --- |
 | **Control plane (Kubernetes)** | Authors program bundles, playlists, and schedules; validates and stores the master library; the heavy logic. Talks **only** to the controller/hub over IP. | Off-board: a Kubernetes cluster / operator app. Never on a C6, never on the Thread mesh. |
 | **UI / operator ingress** | The surface a human/automation uses to express intent. Carries commands and bundle bytes; holds no Matter identity. | USB serial, the controller's private Wi-Fi AP, and the Kubernetes link. **Not** the Matter controller. |
-| **Matter controller / commissioner** | The fabric admin: commissions LED nodes, holds fabric credentials, sends cluster commands, resolves scene/group/priority, caches approved bundles, relays them over Matter. | The **ESP32-S3** of the S3+H2 hub (primary target). The control plane does the heavy lifting; the hub stays a thin device gateway. |
-| **Thread Border Router (OTBR)** | Owns the Thread network and DNS-SD/SRP; routes IPv6 between the IP side and the mesh. **Required** — a single infra-less C6 cannot self-resolve operational nodes. | `esp-thread-br` **host on the ESP32-S3 + ESP32-H2 RCP**, co-located with the Matter controller on the one-board hub. See the topology ladder below. |
+| **Matter controller / commissioner** | The fabric admin: commissions LED nodes, holds fabric credentials, sends cluster commands, resolves scene/group/priority, caches approved bundles, relays them over Matter. | A **separate ESP32-C6 controller node** in the selected split topology. The control plane does the heavy lifting; the controller stays a thin device gateway. |
+| **Thread Border Router (OTBR)** | Owns the Thread network and DNS-SD/SRP; routes IPv6 between the IP side and the mesh. **Required** — a single infra-less C6 cannot self-resolve operational nodes. | `esp-thread-br` **host on the ESP32-S3 + ESP32-H2 RCP**, used as a **BR-only** companion board in the selected split topology. |
 | **RCP (radio co-processor)** | A dedicated 802.15.4 radio driven by the border-router host over UART/SPI. | The **ESP32-H2** on the S3+H2 board (an RCP C6 in the all-C6 fallback). |
 | **Matter OTA Provider** | Stores a firmware image and serves it over the fabric. | The **S3 hub** (the OTA phase). The image arrives over USB or the Kubernetes link first. |
 | **Matter OTA Requestor** | Asks the provider for, verifies, and applies a firmware image. | Each **LED node** (the OTA phase). |
@@ -73,19 +73,17 @@ Key clarifications:
 The 2026-06-02 bring-up proved a single ESP32-C6 acting as Matter commissioner
 **and** its own infra-less SRP/DNS-SD owner cannot resolve its own operational
 nodes (`dns browse` → `Error 28: ResponseTimeout`). The fix is a real OpenThread
-Border Router. Where the controller + border router run is a **validation-gated**
-decision. As of the 2026-06-06 amendment the ladder is:
+Border Router. The later one-board S3+H2 hub experiment also failed its offline
+co-located gate, so the selected topology is:
 
-| Rung | Topology | Role |
-| --- | --- | --- |
-| **Primary target** | S3+H2 one-board hub: ESP32-S3 (Matter controller + esp-thread-br host + thin ingress) + ESP32-H2 RCP | Preferred production target **if** the one board validates within headroom. Least wiring/role sprawl; Wi-Fi/BLE (S3) and 802.15.4 (H2) on separate SoCs. |
-| **Fallback 1 — all-C6 split** | Controller C6 + BR-host C6 + RCP C6 (= the proven **Stage 0** config) | Used if the S3+H2 hub fails its gate. The controller C6 joins the BR-owned mesh over its **own 802.15.4 radio** — never controller↔BR over Wi-Fi. |
-| **Fallback 2 — Pi** | Pi/Linux `ot-br-posix` + RCP/dongle | Final fallback only if the C6/H2 BR path itself is not stable. |
+| Topology | Role |
+| --- | --- |
+| **Selected** | **S3+H2 board as BR-only + separate ESP32-C6 controller + Thread-only C6 LED nodes**. The controller lives on its own C6; the S3 hosts `esp-thread-br`; the H2 is the RCP. Control still rides Thread/Matter, never Wi-Fi. |
+| **Fallback 1** | Controller C6 + BR-host C6 + RCP C6 (= the proven **Stage 0** config). Historical proven backup if the S3+H2 BR-only split ever proves unstable. |
+| **Fallback 2** | Pi/Linux `ot-br-posix` + RCP/dongle. Final fallback only if the Espressif BR path itself is not stable. |
 
-The **locked ladder is S3+H2 hub → all-C6 split → Pi**; each rung is taken only if
-the one above fails its gate. The former all-C6 *co-located* Hub C6 + RCP C6 is
-**superseded** by the S3+H2 board (same one-board goal, radios physically split);
-the single infra-less C6 (Option 1) is ruled out. See
+The former all-C6 *co-located* Hub C6 + RCP C6 is **superseded**; the single
+infra-less C6 (Option 1) is ruled out. See
 [`controller-topology-adr.md`](controller-topology-adr.md).
 
 The gate is quantitative (heap, fragmentation, soak uptime, reboot recovery,
@@ -108,11 +106,11 @@ flowchart TB
         k8s["Kubernetes / operator app<br/>authors + validates + schedules<br/>program bundles, playlists, schedules"]
     end
 
-    subgraph site["Installation — S3+H2 one-board hub (primary target)"]
-        subgraph hub["S3+H2 hub board"]
-            ctrl["ESP32-S3: Matter controller / commissioner"]
+    subgraph site["Installation — selected split topology"]
+        ctrl["ESP32-C6: Matter controller / commissioner"]
+
+        subgraph hub["S3+H2 BR-only companion board"]
             br["ESP32-S3: esp-thread-br host<br/>Thread Leader · SRP · DNS-SD"]
-            gw["ESP32-S3: thin bundle gateway<br/>cache approved bundles, relay"]
             rcp["ESP32-H2: 802.15.4 RCP radio"]
         end
 
@@ -124,11 +122,11 @@ flowchart TB
 
     laptop["USB / private Wi-Fi AP<br/>operator ingress only"]
 
-    k8s -- "Wi-Fi / IP (MQTT)<br/>bundles + live control; telemetry up" --> gw
-    laptop -- "USB serial / Wi-Fi" --> hub
+    k8s -- "Wi-Fi / IP (MQTT)<br/>bundles + live control; telemetry up" --> ctrl
+    laptop -- "USB serial / Wi-Fi" --> ctrl
     br -- "UART / SPI (on-PCB)" --> rcp
     rcp -- "Matter-over-Thread" --> mesh
-    ctrl --- br --- gw
+    ctrl --- br
 ```
 
 Everything that touches LED rendering stays on Matter-over-Thread. Wi-Fi/IP only

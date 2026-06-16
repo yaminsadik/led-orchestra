@@ -1,12 +1,13 @@
 # Stage E — Scale + Soak
 
-**Goal:** prove the S3+H2 one-board hub candidate at **product-like load** —
-scale toward ~20 C6 LED nodes, validate **group** `SetScene`, and run a long soak
-within the quantitative metric targets.
+**Goal:** prove the **selected split topology** at **product-like load** — scale
+toward ~20 C6 LED nodes, validate **group** `SetScene`, and run a long soak within
+the quantitative metric targets. (The co-located one-board hub failed Stage C; the
+selected architecture is **S3+H2 BR-only + a separate ESP32-C6 controller**, so the
+scale/soak gate now runs against that split, not the abandoned one-board hub.)
 
-**Topology:** the [`stage-c-onehub.md`](stage-c-onehub.md) hub (S3 controller +
-esp-thread-br host; H2 RCP) scaled to N C6 LED nodes (grow N incrementally toward
-the ~20-node target).
+**Topology:** S3+H2 board as **BR-only** + a **separate ESP32-C6 controller** +
+N C6 LED nodes (grow N incrementally toward the ~20-node target).
 
 **Gate:** the quantitative thresholds in
 [`../../docs/controller-topology-validation.md`](../../docs/controller-topology-validation.md#passfail-metrics-quantitative-gate)
@@ -27,6 +28,41 @@ hold at 20-node scale through the soak — specifically:
 > visible, not just the endpoint.
 
 ---
+
+## E.0 Bench environment (desk fleet)
+
+Run this scale gate on a **desk fleet of all ~18 production nodes**, not three —
+3 nodes is the firmware dev loop and cannot surface 18-node mesh, commissioning, or
+heap behavior. Stage the work: **3 nodes (with strips) for firmware dev → all ~18
+on the bench for this scale/soak gate → hole-by-hole install**. Going 3 → venue is
+the path to avoid: the venue (ladders, enclosures, sun on the laptop) is the worst
+place to first see an 18-node mesh problem.
+
+**No LED strips or soldering are required for this gate.** Discovery, commissioning,
+group `SetScene` acceptance, heap, and soak all run over the Thread radio; the LED
+node's render task drives an unconnected GPIO, which is fine. Strips/solder belong
+to the per-hole install, not the network test. Attach one short test strip to a node
+or two only if you want a visual confirm of a group command.
+
+Bench hardware:
+
+- **~18 ESP32-C6-DevKitC-1-N8 boards + 2–3 spares.** These are the *production*
+  nodes — every board that passes here ships to a hole; the spares stay on the shelf
+  as field replacements. This doubles as **incoming inspection** (catch a DOA board
+  on the desk, not on a ladder).
+- **Power, not data, for all 18.** A commissioned node needs only 5 V power to stay
+  on the mesh; USB *data* is only for flashing/console. Power the whole fleet from a
+  multi-port USB charging station (a ~20-port / ~100 W station covers 18 × ~0.5 A
+  with margin).
+- **One small powered USB *data* hub** to the laptop for flashing + serial console
+  **one (or a few) boards at a time** — there is no need for 18 simultaneous data
+  links.
+
+**Pre-provision on the bench.** Because `NodeConfig` is durable in NVS, commission
+each node, write its per-hole config (`lo-set-node-config` → segment / GPIO / zone),
+label it, power-cycle, and confirm `lo-read-config` reads back the NVS values. A node
+then arrives at its hole already knowing its identity — install day is mount + power
++ the strip data line, with no re-commissioning in the field.
 
 ## E.1 Commission additional C6 LED nodes
 
@@ -122,11 +158,9 @@ matter esp controller group-settings add-keyset 0x0042 0 0xFFFFFFFFFFFFFFFF <32-
 matter esp controller group-settings bind-keyset 0x0001 0x0042
 matter esp controller group-settings add-group   0x0001 orchestra
 
-# 2. Per node: install the same group key + map (Group Key Management 0x003F),
-#    then enroll the LED endpoint into the group:
-matter esp controller invoke-cmd <node> 0 0x003F 0x00 "<KeySetWrite GroupKeySetStruct>"
-matter esp controller write-attr <node> 0 0x003F 0x00 "[{<GroupKeyMapStruct>}]"
-lo-add-group <node> 1 0x0001 orchestra        # repeat for every node
+# 2. Per node: emit the exact KeySetWrite + GroupKeyMap + AddGroup + ACL
+#    sequence with the helper, then run the printed commands in the controller shell:
+./lo-provision-group-member <node>            # repeat for every node
 
 # 3. One groupcast SetScene reaches all enrolled nodes:
 lo-set-scene-group 0x0001 1 ff0000 10 60
@@ -139,11 +173,13 @@ budget. Because effects are pure functions of `(global_index, time_ms, params)`,
 a single group `SetScene` (+ a shared clock via `SyncClock`) must keep all
 segments coherent without per-node fixups.
 
-**The node-side group-key install (step 2) is the part to confirm on hardware.**
-Until every node holds the group key, a groupcast is silently not accepted and
-each node keeps its last valid scene — so verify by watching **all** strips change
-from one `lo-set-scene-group`, not by the controller's `Done`. Journal the exact
-working `KeySetWrite`/`GroupKeyMap` payloads once proven.
+**The node-side provisioning step (step 2) is the part to confirm on hardware.**
+Until every node holds the group key, membership, and ACL, a groupcast is
+silently not accepted and each node keeps its last valid scene — so verify by
+watching **all** strips change from one `lo-set-scene-group`, not by the
+controller's `Done`. Power-cycle at least one provisioned node before declaring
+the path stable, then confirm groupcast still works. Journal the exact helper
+arguments or printed payloads once proven.
 
 ## E.3 Soak
 
@@ -181,10 +217,11 @@ Notes:
 
 ## Decision
 
-- **PASS** → the S3+H2 one-board hub holds at product-like scale + soak; proceed
-  to [`stage-f-ingress.md`](stage-f-ingress.md). Ratify the baselined thresholds
-  in [`../../docs/controller-topology-validation.md`](../../docs/controller-topology-validation.md).
-- **FAIL — heap/flash/latency at scale** → if it is a co-located-headroom wall,
-  fall back to **Fallback 1, the all-C6 split** (move the controller to its own
-  C6). If it is a discrete scaling bug (SRP table size, group handling), journal
-  it in [`debugging-journal.md`](../../docs/debugging-journal.md), fix, and re-run.
+- **PASS** → the selected split topology holds at product-like scale + soak;
+  proceed to [`stage-f-ingress.md`](stage-f-ingress.md). Ratify the baselined
+  thresholds in [`../../docs/controller-topology-validation.md`](../../docs/controller-topology-validation.md).
+- **FAIL — heap/flash/latency at scale** → journal it in
+  [`debugging-journal.md`](../../docs/debugging-journal.md) and fix in place; the
+  controller already lives on its own C6, so there is no co-location headroom left to
+  reclaim. A discrete scaling bug (SRP table size, group handling) is fixed and
+  re-run; a hard BR-capacity wall escalates to the Pi `ot-br-posix` last-resort BR.

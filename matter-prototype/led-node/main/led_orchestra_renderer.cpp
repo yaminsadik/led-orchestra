@@ -20,6 +20,7 @@ namespace {
 
 static const char *TAG = "lo_renderer";
 static constexpr TickType_t kFrameDelay = pdMS_TO_TICKS(16);
+static constexpr TickType_t kStaticPollDelay = pdMS_TO_TICKS(100);
 
 portMUX_TYPE g_lock = portMUX_INITIALIZER_UNLOCKED;
 led_strip_handle_t g_strip = nullptr;
@@ -62,8 +63,38 @@ uint64_t monotonic_ms()
     return static_cast<uint64_t>(esp_timer_get_time() / 1000);
 }
 
+bool scenes_equal(const LedOrchestraScene &a, const LedOrchestraScene &b)
+{
+    return a.effect == b.effect && a.red == b.red && a.green == b.green && a.blue == b.blue && a.speed == b.speed &&
+           a.brightness == b.brightness && a.sequence == b.sequence && a.scheduled_start_ms == b.scheduled_start_ms;
+}
+
+bool configs_equal(const LedOrchestraNodeConfig &a, const LedOrchestraNodeConfig &b)
+{
+    return a.node_id == b.node_id && a.segment_start == b.segment_start && a.segment_len == b.segment_len &&
+           a.total_leds == b.total_leds && a.led_gpio == b.led_gpio;
+}
+
+bool colors_equal(const lo::CRGB &a, const lo::CRGB &b)
+{
+    return a.r == b.r && a.g == b.g && a.b == b.b;
+}
+
+bool policies_equal(const lo::OutputPolicy &a, const lo::OutputPolicy &b)
+{
+    return colors_equal(a.color_correction, b.color_correction) &&
+           colors_equal(a.color_temperature, b.color_temperature) && a.master_brightness == b.master_brightness &&
+           a.max_milliamps == b.max_milliamps &&
+           a.milliamps_per_led_full_white == b.milliamps_per_led_full_white;
+}
+
 void render_task(void *)
 {
+    LedOrchestraScene last_scene = {};
+    LedOrchestraNodeConfig last_node = {};
+    lo::OutputPolicy last_policy;
+    bool have_rendered_frame = false;
+
     while (true) {
         LedOrchestraScene scene;
         LedOrchestraNodeConfig node;
@@ -101,6 +132,16 @@ void render_task(void *)
             ESP_LOGI(TAG, "scheduled scene activated seq=%" PRIu32 " effect=%u", promoted_seq, scene.effect);
         }
 
+        const LoEffectMeta *meta = led_orchestra_effect_meta(scene.effect);
+        bool animated = meta != nullptr && meta->scrolls;
+        bool render_needed = animated || !have_rendered_frame || !scenes_equal(scene, last_scene) ||
+                             !configs_equal(node, last_node) || !policies_equal(policy, last_policy);
+
+        if (!render_needed) {
+            vTaskDelay(has_pending ? kFrameDelay : kStaticPollDelay);
+            continue;
+        }
+
         uint16_t segment_len = std::min<uint16_t>(node.segment_len, CONFIG_LED_ORCHESTRA_LED_COUNT);
 
         for (uint16_t local = 0; local < segment_len; local++) {
@@ -118,7 +159,17 @@ void render_task(void *)
         }
 
         led_strip_refresh(g_strip);
-        vTaskDelay(kFrameDelay);
+
+        if (!animated) {
+            ESP_LOGI(TAG, "static scene rendered once; holding latched frame effect=%u seq=%" PRIu32, scene.effect,
+                     scene.sequence);
+        }
+        last_scene = scene;
+        last_node = node;
+        last_policy = policy;
+        have_rendered_frame = true;
+
+        vTaskDelay(animated || has_pending ? kFrameDelay : kStaticPollDelay);
     }
 }
 
@@ -143,6 +194,19 @@ esp_err_t led_orchestra_renderer_start()
         ESP_LOGI(TAG, "config loaded from %s: node=%u segment=[%u,%u) total=%u gpio=%u",
                  from_nvs ? "NVS" : "defaults", loaded.node_id, loaded.segment_start,
                  loaded.segment_start + loaded.segment_len, loaded.total_leds, loaded.led_gpio);
+    }
+
+    // Load the last persisted active scene so the node resumes its previous
+    // visual on power-cycle without the controller re-sending SetScene.
+    {
+        LedOrchestraScene loaded;
+        bool from_nvs = false;
+        led_orchestra_scene_load(loaded, from_nvs);
+        portENTER_CRITICAL(&g_lock);
+        g_scene = loaded;
+        portEXIT_CRITICAL(&g_lock);
+        ESP_LOGI(TAG, "scene loaded from %s: effect=%u seq=%" PRIu32,
+                 from_nvs ? "NVS" : "defaults", loaded.effect, loaded.sequence);
     }
 
     led_strip_config_t strip_config = {
@@ -192,6 +256,13 @@ esp_err_t led_orchestra_set_scene(const LedOrchestraScene &scene)
         portEXIT_CRITICAL(&g_lock);
         ESP_LOGI(TAG, "scene seq=%" PRIu32 " effect=%u rgb=%u,%u,%u speed=%u brightness=%u start=now", scene.sequence,
                  scene.effect, scene.red, scene.green, scene.blue, scene.speed, scene.brightness);
+        // Persist so the node resumes this scene after a power cycle without the
+        // controller re-sending SetScene. A save failure is non-fatal: the live
+        // render is already updated.
+        esp_err_t save_err = led_orchestra_scene_save(scene);
+        if (save_err != ESP_OK) {
+            ESP_LOGW(TAG, "scene applied but not persisted (%s)", esp_err_to_name(save_err));
+        }
     } else {
         // Stage as pending; the render task promotes it at the synchronized
         // start time. The active scene keeps rendering until then.

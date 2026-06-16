@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: lo-provision-group-member <node-id> [options]
+
+Print the exact Matter shell commands needed to provision one LED node for
+groupcast acceptance:
+  1. KeySetWrite
+  2. GroupKeyMap write
+  3. Groups AddGroup
+  4. Access Control ACL write (Group/Operate)
+
+Options:
+  --group-id <id>             Application group id. Default: 0x0001
+  --endpoint <id>             LED endpoint id. Default: 1
+  --group-name <name>         Groups cluster name. Default: orchestra
+  --admin-node-id <node-id>   CASE admin subject to preserve. Default: 0x1B669
+  --keyset-id <id>            Group keyset id. Default: 0x0042
+  --epoch-key-hex <32 hex>    16-byte epoch key. Default: d0..df dev key
+  --include-controller-setup  Also print the controller-side group-settings
+                              commands that should be run once per fabric
+  -h, --help                  Show this help
+
+Notes:
+  - The emitted ACL uses Operate privilege for the group subject, not Manage.
+  - This helper standardizes the bench workflow, but it still emits a full ACL
+    replacement containing one CASE admin entry plus one group entry. If a node
+    already has extra ACL rows that must be preserved, read/merge them first.
+EOF
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "error: required command not found: $1" >&2
+    exit 1
+  }
+}
+
+parse_hex_u16() {
+  local value=$1
+  printf '%u' "$((value))"
+}
+
+parse_hex_u64() {
+  local value=$1
+  printf '%u' "$((value))"
+}
+
+if [[ $# -lt 1 ]]; then
+  usage >&2
+  exit 1
+fi
+
+if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+node_id=$1
+shift
+
+group_id="0x0001"
+endpoint_id="1"
+group_name="orchestra"
+admin_node_id="0x1B669"
+keyset_id="0x0042"
+epoch_key_hex="d0d1d2d3d4d5d6d7d8d9dadbdcdddedf"
+include_controller_setup=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --group-id)
+      group_id=${2:?missing value for --group-id}
+      shift 2
+      ;;
+    --endpoint)
+      endpoint_id=${2:?missing value for --endpoint}
+      shift 2
+      ;;
+    --group-name)
+      group_name=${2:?missing value for --group-name}
+      shift 2
+      ;;
+    --admin-node-id)
+      admin_node_id=${2:?missing value for --admin-node-id}
+      shift 2
+      ;;
+    --keyset-id)
+      keyset_id=${2:?missing value for --keyset-id}
+      shift 2
+      ;;
+    --epoch-key-hex)
+      epoch_key_hex=${2:?missing value for --epoch-key-hex}
+      shift 2
+      ;;
+    --include-controller-setup)
+      include_controller_setup=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ ! $epoch_key_hex =~ ^[0-9A-Fa-f]{32}$ ]]; then
+  echo "error: --epoch-key-hex must be exactly 32 hex characters" >&2
+  exit 1
+fi
+
+if [[ ${#group_name} -gt 16 ]]; then
+  echo "error: --group-name must be <= 16 characters" >&2
+  exit 1
+fi
+
+require_cmd xxd
+require_cmd base64
+require_cmd tr
+
+group_id_dec=$(parse_hex_u16 "$group_id")
+keyset_id_dec=$(parse_hex_u16 "$keyset_id")
+admin_node_id_dec=$(parse_hex_u64 "$admin_node_id")
+epoch_key_b64=$(printf '%s' "$epoch_key_hex" | xxd -r -p | base64 | tr -d '\n')
+
+keyset_write_payload=$(cat <<EOF
+{"0:OBJ":{"0:U16":$keyset_id_dec,"1:U8":0,"2:BYT":"$epoch_key_b64","3:U64":1,"4:NULL":null,"5:NULL":null,"6:NULL":null,"7:NULL":null}}
+EOF
+)
+
+group_key_map_payload=$(cat <<EOF
+[{"0:ARR-OBJ":[{"1:U16":$group_id_dec,"2:U16":$keyset_id_dec}]}]
+EOF
+)
+
+acl_payload=$(cat <<EOF
+[{"0:ARR-OBJ":[{"1:U8":5,"2:U8":2,"3:ARR-U64":[$admin_node_id_dec],"4:NULL":null},{"1:U8":3,"2:U8":3,"3:ARR-U64":[$group_id_dec],"4:ARR-OBJ":[{"0:U32":4294048768,"1:U16":$endpoint_id}]}]}]
+EOF
+)
+
+printf '# LED Orchestra group member provisioning for node %s\n' "$node_id"
+printf '# Group id: %s (%u), endpoint: %s, keyset: %s (%u), admin CASE subject: %s (%u)\n' \
+  "$group_id" "$group_id_dec" "$endpoint_id" "$keyset_id" "$keyset_id_dec" "$admin_node_id" "$admin_node_id_dec"
+printf '# ACL privilege: Group/Operate\n'
+printf '\n'
+
+if [[ $include_controller_setup -eq 1 ]]; then
+  cat <<EOF
+# Controller-side group keyset (run once per fabric if not already installed):
+matter esp controller group-settings add-keyset $keyset_id 0 0xFFFFFFFFFFFFFFFF $epoch_key_hex
+matter esp controller group-settings bind-keyset $group_id $keyset_id
+matter esp controller group-settings add-group   $group_id $group_name
+
+EOF
+fi
+
+cat <<EOF
+# 1. Install the group keyset on the node:
+matter esp controller invoke-cmd $node_id 0 0x003F 0x00 $keyset_write_payload
+
+# 2. Map the application group to that keyset on the node:
+matter esp controller write-attr $node_id 0 0x003F 0x00 $group_key_map_payload
+
+# 3. Enroll the LED endpoint into the group:
+lo-add-group $node_id $endpoint_id $group_id $group_name
+
+# 4. Replace the node ACL with CASE admin + group Operate for the custom cluster:
+matter esp controller write-attr $node_id 0 0x001F 0x0000 $acl_payload
+
+# 5. Recommended bench check: power-cycle this node, then verify one
+#    lo-set-scene-group $group_id ... still drives it.
+EOF

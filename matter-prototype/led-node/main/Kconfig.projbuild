@@ -13,7 +13,7 @@ config LED_ORCHESTRA_LED_GPIO
 config LED_ORCHESTRA_LED_COUNT
     int "Physical LEDs driven by this node"
     default 60
-    range 1 300
+    range 1 600
 
 config LED_ORCHESTRA_SEGMENT_START
     int "Default segment start in the virtual strip"
@@ -23,7 +23,7 @@ config LED_ORCHESTRA_SEGMENT_START
 config LED_ORCHESTRA_SEGMENT_LENGTH
     int "Default segment length"
     default 60
-    range 1 300
+    range 1 600
 
 config LED_ORCHESTRA_TOTAL_LEDS
     int "Default total virtual strip LEDs"

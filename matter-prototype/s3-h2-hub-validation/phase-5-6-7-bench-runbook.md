@@ -76,10 +76,11 @@ matter esp controller group-settings add-keyset 0x0042 0 0xFFFFFFFFFFFFFFFF <32-
 matter esp controller group-settings bind-keyset 0x0001 0x0042
 matter esp controller group-settings add-group   0x0001 orchestra
 
-# per node (1,2,3): KeySetWrite + GroupKeyMap (see docs/console.md), then:
-lo-add-group 1 1 0x0001 orchestra
-lo-add-group 2 1 0x0001 orchestra
-lo-add-group 3 1 0x0001 orchestra
+# per node (1,2,3): use the helper to emit KeySetWrite + GroupKeyMap + AddGroup
+# + least-privilege ACL (Group/Operate):
+./lo-provision-group-member 1 --include-controller-setup
+./lo-provision-group-member 2
+./lo-provision-group-member 3
 ```
 
 > The node-side `KeySetWrite`/`GroupKeyMap` install is the **gating step**. Until
@@ -139,8 +140,9 @@ Nodes commissioned (ids):
 DNS browse records:
 Unicast set-scene per node: ok?
 Durable config round-trip (NVS reload after power-cycle): ok?
-Group key install (per-node KeySetWrite/GroupKeyMap) payload that worked:
+Group member provisioning helper / payload that worked:
 ONE group set-scene -> all strips changed? :
+Power-cycle one provisioned node; groupcast still works? :
 Group sync-clock: offsets logged?
 Scheduled group scene -> all flip together, no blank? :
 Heap min-free / largest-free  before / after  @ 3 nodes:

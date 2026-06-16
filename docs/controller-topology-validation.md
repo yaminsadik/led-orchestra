@@ -1,36 +1,36 @@
 # Controller / Border-Router Topology Validation
 
-This is the experiment that decides the production controller/border-router
+This is the experiment record that decided the production controller/border-router
 topology. It turns the validation-gated decision in
 [`controller-topology-adr.md`](controller-topology-adr.md) into a concrete,
-**quantitative** pass/fail test. The result confirms (or rejects) the primary
-hub candidate — it is not run to ratify a foregone conclusion.
+**quantitative** pass/fail test. The result is now closed: the offline one-board
+S3+H2 hub was rejected and the split topology was selected.
 
-**Amended 2026-06-06.** The primary path under test is now the **S3+H2 one-board
-hub** (ESP32-S3 Matter controller + esp-thread-br host; ESP32-H2 RCP). The
-**all-C6 path** below is retained: its **Stage 0 PASSED on 2026-06-04**
-(discovery + operational CASE on a real C6 BR), and it is the proven **Fallback 1**
-if the S3+H2 hub fails its gate. The original failure that motivates the whole
-gate is in [`debugging-journal.md`](debugging-journal.md): a single ESP32-C6
-acting as Matter commissioner **and** its own infra-less SRP/DNS-SD owner could
-not resolve its own operational nodes (`dns browse` → `Error 28:
-ResponseTimeout`). The fix is a real border router that owns SRP/DNS-SD. What is
-*not yet proven* is whether a single S3+H2 board can host the controller **and**
-the BR host within headroom.
+**Resolution (2026-06-10).** Stage B passed with the **S3+H2 board as BR-only**
+and a **separate C6 controller**. The decisive **offline Stage C failed** for the
+co-located one-board hub. The selected architecture is therefore:
+
+```text
+separate ESP32-C6 controller + S3+H2 board as BR-only + Thread-only C6 LED nodes
+```
+
+The original failure that motivates the whole gate is in
+[`debugging-journal.md`](debugging-journal.md): a single ESP32-C6 acting as Matter
+commissioner **and** its own infra-less SRP/DNS-SD owner could not resolve its
+own operational nodes (`dns browse` → `Error 28: ResponseTimeout`). The fix is a
+real border router that owns SRP/DNS-SD.
 
 ## Decision Ladder Under Test
 
 | Rung | Topology | Role in the ladder |
 | --- | --- | --- |
-| **Primary target** | S3+H2 one-board hub (ESP32-S3 controller + esp-thread-br host + thin ingress; ESP32-H2 RCP) | Preferred production target **if** the one board validates within headroom |
-| **Fallback 1 — all-C6 split** | Controller C6 + BR-host C6 + RCP C6 (= the **Stage 0** config) | Proven for discovery + operational CASE (2026-06-04). Used if the S3+H2 hub fails its gate but the C6 BR path is sound |
-| **Fallback 2 — Pi** | Pi/Linux `ot-br-posix` + RCP/dongle | Final fallback only if the C6/H2 esp-thread-br path itself is not stable |
+| **Selected** | **S3+H2 BR-only + separate C6 controller** | Selected 2026-06-10 after Stage B pass, Stage C fail, Stage D recovery pass, and later Phase 5 group-control proof |
+| **Fallback 1** | Controller C6 + BR-host C6 + RCP C6 (= the **Stage 0** config) | Historical proven backup if the S3+H2 BR-only path proves unstable |
+| **Fallback 2** | Pi/Linux `ot-br-posix` + RCP/dongle | Final fallback only if the Espressif BR path itself is not stable |
 
-The **locked ladder is S3+H2 hub → all-C6 split → Pi**; each rung is chosen only
-when the rung above it fails its gate. The former all-C6 *co-located* Hub (Hub C6
-+ RCP C6) is **superseded** by the S3+H2 board (same one-board goal, radios on
-separate SoCs); see the ADR. Option 1 (a single C6 doing everything) sits outside
-this ladder: its infra-less form is ruled out.
+The active architecture is no longer under test: **the selected split topology is
+the current path.** The former all-C6 *co-located* Hub (Hub C6 + RCP C6) is
+superseded; Option 1 (a single C6 doing everything) is ruled out.
 
 Wiring rule (load-bearing): on the S3+H2 hub, the S3's Wi-Fi is ingress/backbone
 only and the **H2 carries all Thread traffic**; controller→LED control stays on
@@ -214,10 +214,10 @@ bundle cache live. Runbook:
 ## Decision Rules
 
 ```text
-Stage A FAIL (toolchain can't build / board unknown) -> resolve before proceeding (do not upgrade toolchain without approval)
-Stage B FAIL (separate client can't resolve through the S3+H2 BR) -> the C6/H2 esp-thread-br path is suspect -> investigate, then Fallback 2 (Pi / ot-br-posix)
-Stage C FAIL (co-located one-board discovery OR heap/stability) -> Fallback 1 (all-C6 split = the proven Stage 0 config)
-Stages A-F PASS within headroom -> S3+H2 one-board hub  [primary target]
+Stage B PASSED -> S3+H2 BR-only split is technically viable
+Stage C FAILED -> reject the offline co-located one-board hub
+Selected path -> S3+H2 BR-only + separate C6 controller
+If the selected split later proves unstable -> all-C6 Stage 0 split, then Pi
 ```
 
 The all-C6 split fallback reuses the **Stage 0** configuration (a separate

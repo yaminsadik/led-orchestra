@@ -1,12 +1,37 @@
 # ADR: Controller / Border-Router Topology
 
-- **Status:** Accepted — validation-gated, **amended 2026-06-06.** The original
-  decision preferred an all-C6 hub; the 2026-06-06 amendment makes the **S3+H2
-  one-board hub the primary target** and demotes all-C6 to a fallback/historical
-  path. The amendment is the forward-looking decision; the original all-C6
-  decision is retained below for history.
-- **Date:** 2026-06-02 (original); 2026-06-06 (amendment)
+- **Status:** Accepted — validation complete, **resolved 2026-06-10.** The
+  original decision preferred an all-C6 hub; the 2026-06-06 amendment made the
+  **S3+H2 one-board hub the primary candidate**; the 2026-06-10 resolution closes
+  the gate after the one-board offline Stage C failure and selects the **split
+  topology**: **S3+H2 board as BR-only + separate ESP32-C6 controller**.
+- **Date:** 2026-06-02 (original); 2026-06-06 (amendment); 2026-06-10 (resolution)
 - **Deciders:** project owner + supervisor
+
+## 2026-06-10 Resolution — Split Topology Selected
+
+The one-board S3+H2 hub experiment is closed. **Stage B passed** (S3+H2 as
+BR-only, separate C6 controller resolves and controls through it) but the
+decisive **offline Stage C failed**: the co-located S3 controller could not
+complete operational discovery through its own BR path
+(`Commissioning complete ... Error CHIP:0x00000032`). That is enough to reject
+the one-board hub as the active architecture.
+
+**Selected architecture:**
+
+```text
+Kubernetes / operator / USB / Wi-Fi ingress
+  -> separate ESP32-C6 Matter controller / commissioner
+  -> S3+H2 board as BR-only (ESP32-S3 esp-thread-br host + ESP32-H2 RCP)
+  -> Matter-over-Thread
+  -> ESP32-C6 LED nodes
+```
+
+This selected split topology is stronger than a paper fallback: it has now
+passed Stage B BR resolution, Stage D recovery work, and real multi-node Matter
+group control. The older all-C6 split remains historical proof and a deeper
+fallback if the S3+H2 BR-only path ever proves unstable. Pi `ot-br-posix`
+remains the last resort.
 
 ## 2026-06-06 Amendment — S3+H2 One-Board Hub Is The Primary Target
 
@@ -60,16 +85,15 @@ Kubernetes / operator / USB / Wi-Fi ingress
 | **Fallback 1 — all-C6 split** | Controller C6 + BR-host C6 + RCP C6 (the former Option 3, and exactly the **Stage 0** config) | Proven for discovery + operational CASE on 2026-06-04. Use if the S3+H2 hub fails its gate but the C6 BR path is sound. |
 | **Fallback 2 — Pi** | Pi/Linux `ot-br-posix` + RCP/dongle (former Option 4) | Final fallback only if the C6/H2 esp-thread-br path itself is not stable. |
 
-**Status of one-board sufficiency: HYPOTHESIS.** That a *single* S3+H2 board can
+**Status of one-board sufficiency: historical failed hypothesis.** That a *single* S3+H2 board can
 host the Matter controller **and** the BR host **and** (later) the thin ingress
-within heap/flash headroom is **not proven.** It is gated by the staged S3+H2
+within heap/flash headroom was **not proven.** It was gated by the staged S3+H2
 experiment in
 [`controller-topology-validation.md`](controller-topology-validation.md) and the
 runbooks in
 [`../matter-prototype/s3-h2-hub-validation/`](../matter-prototype/s3-h2-hub-validation/).
-Do not claim the board is the hub until the one-node end-to-end gate (commission
-→ resolve through the BR → CASE → `SetScene` → physical render) passes on real
-hardware.
+The decisive offline Stage C gate failed, so the board is retained only as the
+**BR-only** half of the selected split topology.
 
 **What is preserved.** The Stage 0 all-C6 evidence stays as historical proof and
 as the Fallback-1 runbook
@@ -111,8 +135,8 @@ border router on one C6**, given the C6's limited RAM/flash.
 ## Decision (original 2026-06-02 — superseded by the 2026-06-06 amendment above)
 
 > Superseded: the all-C6-first ladder below is retained for history. The
-> forward-looking ladder is in the 2026-06-06 amendment — S3+H2 one-board hub
-> (target) → all-C6 split (Stage 0 config) → Pi. Former Option 2 (all-C6
+> forward-looking ladder was in the 2026-06-06 amendment — S3+H2 one-board hub
+> (candidate) → all-C6 split (Stage 0 config) → Pi. Former Option 2 (all-C6
 > co-located Hub C6 + RCP) is superseded by the S3+H2 board, which achieves the
 > same one-board hub with Wi-Fi/BLE and 802.15.4 on physically separate SoCs.
 
@@ -155,15 +179,15 @@ History: the decisive first step for the all-C6 path was **Stage 0** — prove a
 *separate* Thread client resolves an LED node's `_matter._tcp` record through the
 BR (host+RCP), not the BR resolving its own record. **Stage 0 PASSED on
 2026-06-04** (discovery + operational CASE), retiring the colocated
-self-resolution failure for the all-C6 split. The decisive first step for the
-S3+H2 hub is the **one-node end-to-end gate** (Stage C: the co-located S3
-controller commissions a C6 LED, resolves it through its own H2-backed BR,
-establishes CASE, and renders `SetScene`). Decision mapping:
+self-resolution failure for the all-C6 split. The decisive test for the S3+H2
+hub was the **one-node end-to-end gate** (Stage C: the co-located S3 controller
+commissions a C6 LED, resolves it through its own H2-backed BR, establishes
+CASE, and renders `SetScene`). That gate failed offline. Decision mapping:
 
 ```text
-Stage 0 (all-C6 split) PASSED 2026-06-04 (discovery + operational CASE).
-S3+H2 hub Stages A-F PASS within headroom -> S3+H2 one-board hub  [primary target]
-S3+H2 hub FAILS (one-board discovery OR heap/stability/flash) -> all-C6 split (= Stage 0 config)
+Stage B (S3+H2 BR-only + separate C6 controller) PASSED 2026-06-08
+Stage C (offline co-located S3+H2 one-board hub) FAILED 2026-06-09
+Selected topology 2026-06-10 -> S3+H2 BR-only + separate C6 controller
 C6/H2 esp-thread-br path itself not stable -> Pi / ot-br-posix
 ```
 

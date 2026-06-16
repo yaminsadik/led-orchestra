@@ -1,0 +1,21 @@
+# LED Orchestra LED node — 8 MB (ESP32-C6-WROOM-1-N8) partition layout.
+# Deployment standard; rationale in docs/led-node-flash-sizing-decision.md.
+#
+# Dual-OTA app slots are 3 MB each (current app ~1.84 MB → ~1.3 MB / ~63% headroom
+# per slot, vs ~2% on the 4 MB layout). Front matter (esp_secure_cert / nvs /
+# nvs_keys / otadata / phy_init) is byte-identical to the 4 MB partitions.csv so
+# factory + NVS tooling and any already-provisioned credentials stay valid. The
+# ~1.9 MB above fctry is intentionally left unpartitioned as reserve for a future
+# on-node data partition without having to disturb the OTA slots.
+#
+# NOTE: this layout only fits/boots on an 8 MB (N8) part. For 4 MB (N4) units use
+# partitions.csv with CONFIG_ESPTOOLPY_FLASHSIZE_4MB.
+# Name,   Type, SubType, Offset,   Size, Flags
+esp_secure_cert,  0x3F, ,0xd000,    0x2000, encrypted
+nvs,      data, nvs,     0x10000,   0xC000,
+nvs_keys, data, nvs_keys,,          0x1000, encrypted
+otadata,  data, ota,     ,          0x2000
+phy_init, data, phy,     ,          0x1000,
+ota_0,    app,  ota_0,   0x20000,   0x300000,
+ota_1,    app,  ota_1,   0x320000,  0x300000,
+fctry,    data, nvs,     0x620000,  0x6000

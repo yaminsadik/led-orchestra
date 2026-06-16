@@ -2,12 +2,11 @@
 
 The controller node is a Matter controller/commissioner for the private LED
 Orchestra fabric, and the local source of truth for scenes, node inventory, and
-groups. Hardware bring-up established it needs a real OpenThread Border Router, so
-under the amended decision it evolves into the **S3+H2 one-board hub** (Matter
-controller + esp-thread-br host on the **ESP32-S3**, with an **ESP32-H2 RCP**
-radio) plus a thin Kubernetes bundle gateway — the validation-gated primary
-target. As an `esp32c6` build it is also the commissioner in the proven all-C6
-split fallback. See
+groups. Hardware bring-up established it needs a real OpenThread Border Router.
+The offline co-located S3+H2 one-board hub then failed its validation gate, so
+the selected architecture keeps this app as a **separate ESP32-C6 controller**
+alongside the **S3+H2 board used as BR-only**. The older all-C6 split remains a
+historical deeper fallback. See
 [`../../docs/controller-topology-adr.md`](../../docs/controller-topology-adr.md).
 
 It receives operator intent over USB serial and controller-local Wi-Fi, and
@@ -18,9 +17,9 @@ required to render scenes.
 
 ## Acceptance Criteria
 
-- Builds with ESP-IDF/ESP-Matter for target `esp32c6` (the all-C6 fallback
-  commissioner); the S3+H2 hub variant targets `esp32s3` with the esp-thread-br
-  host + H2 RCP (see the S3+OTBR scaffold in `../s3-h2-hub-validation/`).
+- Builds with ESP-IDF/ESP-Matter for target `esp32c6` as the selected separate
+  controller/commissioner; historical S3+OTBR scaffolding is retained in
+  `../s3-h2-hub-validation/`.
 - Provides USB serial commands for commissioning, listing nodes, setting scenes,
   setting node config, syncing clocks, and loading OTA images. Provides
   controller-local Wi-Fi ingress through a private AP by default; station mode
@@ -47,6 +46,9 @@ required to render scenes.
   - `lo-sync-clock-group <group-id> [controller-time-ms]`
   - `lo-scheduled-scene-group <group-id> <delay-ms> <effect-id> <rrggbb> <speed> <brightness> [sequence]`
   - `lo-show-group-help` — prints the one-time group key + enrollment sequence
+  - `../s3-h2-hub-validation/lo-provision-group-member` — host-side helper that
+    prints the four per-node provisioning commands with a least-privilege
+    Group/Operate ACL
   - Group keysets use the built-in `controller group-settings add-keyset/bind-keyset/add-group`.
     Each node also needs Group Key Management state and an Access Control ACL
     entry for the group subject; that node-side sequence is the hardware-gated step (see
@@ -57,12 +59,11 @@ required to render scenes.
   Matter server + the `esp_matter_ota_provider` component with DCL disabled and a
   hub-local image endpoint — see the Phase 7 runbook
   [`../s3-h2-hub-validation/phase-7-offline-ota.md`](../s3-h2-hub-validation/phase-7-offline-ota.md).
-- **Staged (not yet gated):** an S3+OTBR build path for this app — a committed
+- **Historical (not selected):** an S3+OTBR build path for this app — a committed
   `sdkconfig.controller-node.s3-otbr.defaults` overlay and a UART-RCP variant of
   `main/esp_ot_config.h` — lives in
   [`../s3-h2-hub-validation/`](../s3-h2-hub-validation/). It compiles toward the
-  S3+H2 hub but is **not** proven: the Stage C gate is run with the stock
-  esp-matter `controller` example first, then this app is folded in.
+  rejected one-board S3+H2 hub and is retained only for history/reference.
 
 For opening the monitor, log verbosity, the built-in command groups, and the
 full terminal command reference, see [`docs/console.md`](../../docs/console.md).
@@ -93,8 +94,8 @@ manager takes over the radio, forces STA, and stops the operator AP
 Resolved finding: with CHIP Wi-Fi off and no border router present, Matter
 operational discovery times out — an infra-less single C6 cannot self-resolve
 its DNS-SD records. The controller path therefore requires a real OpenThread
-Border Router; the next work is the S3+H2 one-board hub validation (Stages A-F),
-with the all-C6 split and Pi as fallbacks. See
+Border Router; the selected architecture is now the **split topology** with
+this controller on its own C6 and the S3+H2 board as BR-only. See
 [`../../docs/controller-topology-adr.md`](../../docs/controller-topology-adr.md)
 and [`../../docs/debugging-journal.md`](../../docs/debugging-journal.md).
 
@@ -108,10 +109,9 @@ devices and do not move Matter control off the controller node.
 The `sdkconfig.defaults` file records the intended private-fabric controller
 direction. It currently uses Thread, enables controller-local private AP ingress
 by default, and disables WiFi station mode unless deliberately selected through
-Kconfig. Under the amended decision this app grows the esp-thread-br host role on
-the **ESP32-S3** (driving the **ESP32-H2 RCP** over UART), or joins a separate
-BR's mesh over its native radio in the all-C6 split fallback; the committed S3+H2
-overlays live in [`../s3-h2-hub-validation/`](../s3-h2-hub-validation/). See
+Kconfig. In the selected architecture this app stays on its own **ESP32-C6** and
+joins the S3+H2 BR's mesh over its native 802.15.4 radio; historical S3+H2
+one-board overlays live in [`../s3-h2-hub-validation/`](../s3-h2-hub-validation/). See
 [`../../docs/controller-topology-adr.md`](../../docs/controller-topology-adr.md).
 Operator Wi-Fi does not add venue Wi-Fi, internet, or LED-node Wi-Fi control.
 
