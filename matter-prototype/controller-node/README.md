@@ -1,12 +1,14 @@
 # Controller Node Prototype
 
-The controller node is a Matter controller/commissioner for the private LED
-Orchestra fabric, and the local source of truth for scenes, node inventory, and
-groups. Hardware bring-up established it needs a real OpenThread Border Router.
-The offline co-located S3+H2 one-board hub then failed its validation gate, so
-the selected architecture keeps this app as a **separate ESP32-C6 controller**
-alongside the **S3+H2 board used as BR-only**. The older all-C6 split remains a
-historical deeper fallback. See
+This is the active ESP32-C6 Matter controller/commissioner for LED Orchestra.
+It owns the private Matter fabric, commissions LED nodes, sends custom-cluster
+commands, manages groups, and exposes the operator shell.
+
+Hardware bring-up established that this controller needs a real OpenThread
+Border Router. The offline co-located S3+H2 one-board hub then failed its
+validation gate, so the selected architecture keeps this app on a **separate
+ESP32-C6 controller** alongside the **S3+H2 board used as BR-only**. The older
+all-C6 split remains a historical fallback. See
 [`../../docs/controller-topology-adr.md`](../../docs/controller-topology-adr.md).
 
 It receives operator intent over USB serial and controller-local Wi-Fi, and
@@ -14,6 +16,43 @@ validated program bundles from Kubernetes over IP. Those clients are ingress
 only, not the Matter controller. The hub is the local Matter OTA Provider. LED
 nodes remain controlled over Thread; no venue Wi-Fi, cloud, or internet is
 required to render scenes.
+
+## Quick Start
+
+Create local AP credentials before building a controller image:
+
+```bash
+cp sdkconfig.defaults.local.example sdkconfig.defaults.local
+```
+
+Set the private AP SSID/password in `sdkconfig.defaults.local`, then build:
+
+```bash
+. "$HOME/esp/esp-idf/export.sh"
+. "$HOME/esp/esp-matter/export.sh"
+
+idf.py set-target esp32c6
+idf.py build
+```
+
+Open the monitor after flashing:
+
+```bash
+idf.py -p <CONTROLLER_PORT> monitor
+```
+
+For the full command reference, monitor setup, and group enrollment steps, use
+[`../../docs/console.md`](../../docs/console.md).
+
+## Current Status
+
+- Builds for `esp32c6` as the separate controller/commissioner.
+- Boots to the LED Orchestra shell over USB serial/JTAG.
+- Starts a standalone private operator AP when local credentials are configured.
+- Sends unicast `SetScene`, `SetNodeConfig`, and `SyncClock`.
+- Sends Matter group scene and clock commands through group node ids.
+- Includes a build-gated OTA Provider scaffold; functional offline OTA still
+  needs local image plumbing and hardware validation.
 
 ## Acceptance Criteria
 

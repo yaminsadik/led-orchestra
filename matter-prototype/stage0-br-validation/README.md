@@ -1,10 +1,18 @@
 # Stage 0 — Border-Router Discovery Validation (Runbook)
 
-This is the executable runbook for **Phase 4, Stage 0** of the controller /
-border-router topology validation. It is the primary go/no-go for the whole
-ladder: it proves (or disproves) that a **separate Thread client can resolve an
-LED node's `_matter._tcp` record through a real OpenThread Border Router**, on
-all-C6 hardware.
+This is a historical but still useful fallback runbook. It records the all-C6
+border-router discovery validation that proved the important architectural fact:
+a **separate Thread client can resolve an LED node's `_matter._tcp` record
+through a real OpenThread Border Router**.
+
+The selected product topology is now **S3+H2 board as BR-only + separate
+ESP32-C6 controller + ESP32-C6 LED nodes**. Use this directory when you need the
+older all-C6 fallback evidence or a known-good diagnostic path for border-router
+discovery. For the active S3+H2 BR-only path, start with
+[`../s3-h2-hub-validation/README.md`](../s3-h2-hub-validation/README.md).
+
+This runbook was the executable **Phase 4, Stage 0** go/no-go for the original
+controller/border-router topology ladder.
 
 Read alongside:
 [`../../docs/controller-topology-validation.md`](../../docs/controller-topology-validation.md)

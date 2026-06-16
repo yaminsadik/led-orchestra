@@ -1,167 +1,144 @@
 # LED Orchestra
 
-Distributed addressable-LED light show. Up to 20 ESP32-C6 nodes each drive a
-WS2812B/NeoPixel strip segment; together the segments form one virtual strip.
-The active implementation path is C++ on ESP-IDF/ESP-Matter over Thread so the
-installation can run as a fully offline local mesh with a dedicated controller
-node.
+LED Orchestra is an offline, distributed addressable-LED show controller. Each
+ESP32-C6 LED node drives one WS2812B/NeoPixel strip segment; together the nodes
+render one virtual strip over Matter-over-Thread.
 
-Rendering scenes needs no venue Wi-Fi, cloud, or internet. A Kubernetes control
-plane authors and schedules shows and pushes them to the hub over IP, but the
-live show keeps running without it. USB and a controller-local Wi-Fi AP are
-operator ingress to the hub:
+The active path is C++ on ESP-IDF and ESP-Matter. The selected hardware topology
+is:
 
 ```text
-Kubernetes control plane (authors/validates/schedules program bundles)
-  + USB / Wi-Fi (operator ingress)
-  -> separate ESP32-C6 controller / commissioner
-  -> S3+H2 board as BR-only:
-       ESP32-S3 (esp-thread-br host)
-       ESP32-H2 (802.15.4 RCP radio, on-PCB UART link)
-  -> Thread/Matter mesh
-  -> ESP32-C6 LED nodes (Thread-only renderers; store + render bundles)
+operator / Kubernetes ingress
+  -> separate ESP32-C6 controller / Matter commissioner
+  -> Espressif S3+H2 board used as Thread Border Router only
+       ESP32-S3: esp-thread-br host
+       ESP32-H2: 802.15.4 RCP radio
+  -> Thread / Matter mesh
+  -> ESP32-C6 LED nodes
+  -> WS2812B / NeoPixel strips
 ```
 
-Kubernetes and the laptop/mobile are ingress only; the C6 controller is the
-Matter controller/commissioner. LED nodes are controlled over Thread and never
-join Wi-Fi. A real OpenThread Border Router is required (confirmed on hardware).
-The offline **S3+H2 one-board hub failed** its validation gate, so the selected
-architecture is the current split topology above. See
-[Architecture](docs/architecture.md#roles-and-responsibilities) for the role
-glossary and [the topology ADR](docs/controller-topology-adr.md) for the
-decision and its retained fallbacks.
+Rendering does not require venue Wi-Fi, cloud access, or internet. USB serial and
+the controller-local Wi-Fi AP are operator ingress to the controller. Kubernetes
+is a future/off-board authoring and scheduling plane that pushes validated show
+bundles to the controller; it does not talk directly to LED nodes.
 
-The completed Rust WiFi/UDP Phase 1/2 implementation is archived on the
-`archive/rust-phase-2` branch. Keep `main` focused on the C++ Matter/Thread
-prototype and later production path.
+## Current Status
 
-## Layout
+- **Active development path:** `matter-prototype/`
+- **Selected topology:** S3+H2 board as BR-only plus a separate ESP32-C6
+  controller.
+- **Rejected topology:** the all-in-one offline S3+H2 hub failed validation; the
+  board stays in the project as the BR-only companion board.
+- **Archived prototype:** the earlier Rust Wi-Fi/UDP Phase 1/2 proof lives on
+  `archive/rust-phase-2`.
 
-| Path | What it is | Build target |
-| --- | --- | --- |
-| `matter-prototype/led-node/` | ESP-IDF/ESP-Matter LED node for one physical strip segment | `esp32c6` via ESP-IDF |
-| `matter-prototype/controller-node/` | ESP-IDF/ESP-Matter controller/commissioner for the selected split topology | `esp32c6` |
-| `matter-prototype/common/` | Shared C++ constants for cluster ids, command ids, tags, and effect ids | included by both apps |
-| `matter-prototype/cluster/` | Human-readable LED Orchestra custom cluster contract | docs |
-| `matter-prototype/s3-h2-hub-validation/` | Historical S3+H2 one-board validation runbooks + retained BR-only split-topology support | host + `esp32s3`/`esp32h2` |
-| `matter-prototype/stage0-br-validation/` | Stage 0 all-C6 BR runbook + evidence (Fallback-1) | host + `esp32c6` |
+What works today:
 
-## Documentation
+- ESP32-C6 LED-node and controller-node apps build with ESP-IDF/ESP-Matter.
+- The controller boots with USB shell and private operator AP ingress.
+- Matter commissioning, Thread bring-up, group commands, durable node config,
+  scheduled scene support, and OTA requestor/provider scaffolding are present.
+- Multi-node synchronized scene and offline OTA still need the remaining
+  hardware gates before they are field-ready.
 
-- [Architecture](docs/architecture.md) — roles, topology, runtime flow, program
-  distribution, and system invariants.
-- [Topology ADR](docs/controller-topology-adr.md) — the resolved
-  controller/border-router decision (selected split topology, with retained
-  fallbacks).
-- [Topology validation](docs/controller-topology-validation.md) — the staged
-  experiment record that rejected the one-board hub and selected the split
-  topology.
-- [Mesh network](docs/mesh-network.md) — Thread mesh topology, protocol stack,
-  and the join/control sequence over 802.15.4.
-- [Debugging journal](docs/debugging-journal.md) — the discovery-timeout
-  investigation that established the border-router requirement.
-- [Matter/Thread plan](docs/matter-thread.md) — ESP-Matter over Thread tradeoffs,
-  roles, custom cluster contract, and OTA direction.
-- [Console operation](docs/console.md) — how to open the controller monitor, log
-  verbosity, and the full console/terminal command reference.
-- [Requirements](docs/requirements.md) — ESP-IDF, ESP-Matter, FastLED direction,
-  and local shell setup.
-- [Roadmap](docs/roadmap.md) — phase-by-phase acceptance criteria and the next
-  implementation slice.
+See [Roadmap](docs/roadmap.md) for phase-by-phase acceptance criteria and
+remaining work.
 
-## Architectural rules
+## Repository Map
 
-1. **One virtual strip.** Every physical strip is a contiguous slice of the
-   global LED index space. Effects are calculated as
-   `f(global_index, time_ms) -> Rgb`.
-2. **Effects are pure functions.** No per-node state. Identical inputs ⇒
-   identical pixels everywhere — this is how nodes stay visually in sync
-   without sample-accurate clocks (just a shared time origin).
-3. **Nodes are independent.** A node that loses network contact keeps running
-   its last valid scene locally. When it reconnects, the controller resends
-   scene + segment metadata + sync clock. Missing nodes are marked offline;
-   the show keeps going on the rest of the strip.
-4. **Override priority** (highest wins):
-   `emergency > segment > group > global`.
-5. **Adding a new effect** = add a stable effect id in the C++ registry, render
-   it in the LED-node effect engine, and keep ids append-only. Later OTA work
-   will let new compiled effect code reach nodes without a USB cable.
+| Path | Purpose |
+| --- | --- |
+| `matter-prototype/` | Active ESP-IDF/ESP-Matter firmware lane. Start here for builds. |
+| `matter-prototype/led-node/` | ESP32-C6 Matter-over-Thread LED node. Renders one strip segment. |
+| `matter-prototype/controller-node/` | Separate ESP32-C6 Matter controller/commissioner. |
+| `matter-prototype/common/` | Shared C++ cluster, command, tag, and effect constants. |
+| `matter-prototype/cluster/` | Human-readable LED Orchestra custom cluster contract. |
+| `matter-prototype/s3-h2-hub-validation/` | S3+H2 validation record and retained BR-only split-topology support. |
+| `matter-prototype/stage0-br-validation/` | Historical all-C6 border-router validation and fallback runbook. |
+| `docs/` | Architecture, roadmap, console commands, validation record, and hardware notes. |
 
-## Hardware
+## Start Here
 
-- **Hub:** Espressif ESP Thread BR / Zigbee GW board (ESP32-S3-WROOM-1 host +
-  ESP32-H2-MINI-1 RCP; 8 MB flash + 2 MB PSRAM, 4 MB on early samples). Zigbee
-  unused.
-- ESP32-C6 dev board per LED node
-- WS2812B / NeoPixel strip per node (5 V, addressable; pads: GND, DIN, +5 V)
-- **External 5 V power supply for the strip** — do not power it from the ESP32
-- ESP32 GND and PSU GND must be tied together
-- ESP32 GPIO → strip DIN (default: GPIO2; configurable per node)
+1. Read [Architecture](docs/architecture.md) for the role split between
+   Kubernetes, operator ingress, the Matter controller, the Thread Border Router,
+   and LED nodes.
+2. Read [Topology ADR](docs/controller-topology-adr.md) if you need to understand
+   why the project selected a separate controller plus BR-only S3+H2 board.
+3. Read [Requirements](docs/requirements.md) before building; ESP-IDF and
+   ESP-Matter must both be installed and exported in each shell.
+4. Build the active apps from [matter-prototype](matter-prototype/README.md).
+5. Use [Console Operation](docs/console.md) for monitor setup and command
+   references.
 
 ## Build
 
-### One-Time Setup
-
-See [Requirements](docs/requirements.md) for the full ESP-IDF/ESP-Matter setup.
+One-time shell setup, assuming ESP-IDF and ESP-Matter are already installed:
 
 ```bash
-# Install host prerequisites, then clone/install ESP-IDF and ESP-Matter as
-# described in docs/requirements.md.
 . "$HOME/esp/esp-idf/export.sh"
 . "$HOME/esp/esp-matter/export.sh"
 export IDF_CCACHE_ENABLE=1
 ```
 
-### ESP-Matter/Thread Prototype
-
-The required ESP-IDF/ESP-Matter install and per-shell export steps are in
-[Requirements](docs/requirements.md).
-
-Prototype goals:
-
-- LED node: ESP32-C6 Matter-over-Thread device with a custom LED Orchestra
-  cluster and WS2812 output. Later acts as a Matter OTA Requestor.
-- Controller node: ESP32-C6 Matter controller/commissioner and local source of
-  truth for scenes, node inventory, and groups. It takes operator intent (and
-  later OTA image bytes) over USB serial or the controller's private Wi-Fi AP.
-  Laptop/mobile clients are UI/operator ingress only — they are not the Matter
-  controller and hold no fabric credentials.
-- First fabric: private development Matter fabric with generated per-device
-  factory data and test/dev credentials.
-- Rendering: start from the working ESP-IDF `led_strip` renderer, then validate
-  FastLED as the C++ effect/rendering layer before larger effect refactors.
-
-Build commands:
+Build the LED node:
 
 ```bash
-. "$HOME/esp/esp-idf/export.sh"
-. "$HOME/esp/esp-matter/export.sh"
-
 cd matter-prototype/led-node
 idf.py set-target esp32c6
 idf.py build
+```
 
+Build the controller node:
+
+```bash
 cd ../controller-node
 idf.py set-target esp32c6
 idf.py build
 ```
 
-The historical **S3+H2 one-board validation** builds from the stock esp-matter
-examples with our committed overlays; see
-[matter-prototype/s3-h2-hub-validation/](matter-prototype/s3-h2-hub-validation/)
-(`build-s3-hub.sh`).
+Before flashing the controller AP image, create local AP credentials from the
+committed template:
 
-## Phase status
+```bash
+cd matter-prototype/controller-node
+cp sdkconfig.defaults.local.example sdkconfig.defaults.local
+```
 
-- [x] **Phase 1/2** — Rust Wi-Fi/UDP proof archived on `archive/rust-phase-2`
-- [~] Phase 3 — C++ ESP-Matter/Thread feasibility
-  - Apps build; controller boots and runs its operator AP; BLE commissioning
-    completes PASE + `AddNOC`. Bring-up established that a single infra-less C6
-    cannot self-resolve operational nodes → a real border router is required.
-- [x] **Phase 4 — Border-router topology validation** — the offline one-board
-  S3+H2 hub failed; the selected architecture is **S3+H2 BR-only + separate C6
-  controller**.
-- [~] Phase 5 — Multi-node offline Thread mesh
-- [ ] Phase 6 — Segment config, synchronized FastLED effects, and program bundles
-- [ ] Phase 7 — Offline OTA through the hub
-- [ ] Phase 8 — Operator UX and Kubernetes control plane
+Then edit `sdkconfig.defaults.local`. Do not commit real SSID/password values.
+
+## Hardware
+
+- Espressif ESP Thread Border Router / Zigbee Gateway board, used as BR-only:
+  ESP32-S3-WROOM-1 host plus ESP32-H2-MINI-1 RCP.
+- One ESP32-C6 dev board for the controller node.
+- One ESP32-C6 dev board per LED node.
+- WS2812B / NeoPixel strip per LED node.
+- External 5 V strip power supply. Do not power strips from the ESP32 board.
+- Shared ground between ESP32 and LED power supply.
+- Default LED data pin: GPIO2, configurable per node.
+
+## Design Rules
+
+- The installation is one virtual strip. Every physical strip owns a contiguous
+  range of the global LED index space.
+- Effects are pure functions of `global_index` and time, so adjacent segments
+  stay visually aligned.
+- Nodes keep rendering their last valid scene or bundle if the controller or
+  border router is unavailable.
+- Override priority is `emergency > segment > group > global`.
+- Effect ids are append-only. New effect code ships as firmware through OTA;
+  program bundles are declarative data.
+
+## Key Docs
+
+- [Architecture](docs/architecture.md)
+- [Roadmap](docs/roadmap.md)
+- [Console Operation](docs/console.md)
+- [Matter/Thread Plan](docs/matter-thread.md)
+- [Mesh Network](docs/mesh-network.md)
+- [Topology ADR](docs/controller-topology-adr.md)
+- [Topology Validation](docs/controller-topology-validation.md)
+- [Debugging Journal](docs/debugging-journal.md)
+- [LED Strip Power Bring-Up](docs/led-strip-power-bringup.md)
+- [LED Node Flash Sizing Decision](docs/led-node-flash-sizing-decision.md)

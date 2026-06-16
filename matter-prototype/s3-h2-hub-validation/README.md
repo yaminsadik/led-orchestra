@@ -1,20 +1,52 @@
 # S3+H2 One-Board Hub Validation
 
-This package records the **2026-06-06 one-board-hub validation attempt**: whether one
-**Espressif ESP Thread Border Router / Zigbee Gateway board** — an
-**ESP32-S3-WROOM-1** host + an **ESP32-H2-MINI-1** RCP — can be the complete LED
-Orchestra hub (Matter controller/commissioner **and** esp-thread-br host), driving
-Thread-only **ESP32-C6** LED nodes over Matter-over-Thread.
+This package is both a historical validation record and retained bring-up
+support for the selected split topology.
 
-That one-board sufficiency hypothesis is now **closed as a failure for the
-offline product shape**: the decisive **Stage C** co-located gate failed. The
-board is retained in the project as a **BR-only companion board** inside the
-selected split topology, not as the active all-in-one hub.
+Historical question: could one **Espressif ESP Thread Border Router / Zigbee
+Gateway board** be the complete LED Orchestra hub, with the **ESP32-S3-WROOM-1**
+acting as both Matter controller/commissioner and `esp-thread-br` host while the
+**ESP32-H2-MINI-1** acted as the Thread RCP?
+
+Answer: **no for the offline product shape.** The decisive **Stage C**
+co-located gate failed. The board is retained as a **BR-only companion board**
+inside the selected split topology, not as the active all-in-one hub.
 
 Decision context: [`../../docs/controller-topology-adr.md`](../../docs/controller-topology-adr.md)
 (the amended ladder) and
 [`../../docs/controller-topology-validation.md`](../../docs/controller-topology-validation.md)
 (the quantitative gate + the Stage A-F experiment this package runs).
+
+## Current Use
+
+Use this directory when you need to:
+
+- Build or flash the S3+H2 board as the retained Thread Border Router companion.
+- Reproduce or inspect the one-board hub validation history.
+- Run Phase 5/6/7 bench work on the selected split topology.
+- Provision Matter group membership with
+  [`lo-provision-group-member`](lo-provision-group-member).
+
+Do not use this directory as proof that the all-in-one S3+H2 hub is selected.
+The selected system is:
+
+```text
+ESP32-C6 controller + S3+H2 BR-only board + ESP32-C6 LED nodes
+```
+
+## Quick Start
+
+Use the helper script from this directory:
+
+```bash
+./build-s3-hub.sh build-rcp
+./build-s3-hub.sh build-br
+```
+
+Hardware flashing and monitor commands depend on the enumerated USB port for the
+board; see the stage runbooks below before flashing. Application-firmware bench
+work for the selected split topology starts with
+[`phase-5-6-7-bench-runbook.md`](phase-5-6-7-bench-runbook.md).
 
 ## Historical Why One S3+H2 Board Was Attractive
 

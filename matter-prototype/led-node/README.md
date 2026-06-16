@@ -1,7 +1,37 @@
 # LED Node Prototype
 
-The LED node is an ESP32-C6 Matter-over-Thread device that owns one WS2812B
-segment and exposes the LED Orchestra custom cluster.
+This is the active ESP32-C6 LED-node firmware. Each node joins the private
+Matter-over-Thread fabric, owns one physical WS2812B/WS2815 strip segment, and
+exposes the LED Orchestra custom cluster.
+
+The controller assigns each node a virtual segment range. The node renders only
+that range, but effects use global LED indexes so a scene can flow across
+multiple physical strips.
+
+## Quick Start
+
+```bash
+. "$HOME/esp/esp-idf/export.sh"
+. "$HOME/esp/esp-matter/export.sh"
+
+idf.py set-target esp32c6
+idf.py build
+```
+
+Flash one physical board at a time while using the default development Matter
+credentials. After commissioning, assign segment metadata from the controller
+with `lo-set-node-config`.
+
+## Current Status
+
+- Builds for `esp32c6`.
+- Runs as a Thread Matter device, not as a Wi-Fi station.
+- Renders `off`, `solid`, `rainbow`, `fibonacci`, and `aurora-breathe`.
+- Persists accepted node config in NVS with magic/version/CRC validation.
+- Supports scheduled `SetScene` promotion using `SyncClock` time offsets.
+- Includes Matter OTA Requestor support and OTA app partitions.
+- Flash headroom is tight on 4 MB C6 boards; check size before adding larger
+  features.
 
 ## Acceptance Criteria
 

@@ -1,8 +1,20 @@
 # Matter Prototype
 
-This directory is the active C++ ESP-IDF/ESP-Matter prototype lane for LED
-Orchestra. The completed Rust WiFi/UDP Phase 1/2 implementation is archived on
-the `archive/rust-phase-2` branch.
+This directory is the active firmware lane for LED Orchestra. It contains the
+C++ ESP-IDF/ESP-Matter apps for the Thread LED nodes and the separate ESP32-C6
+controller, plus the validation material that selected the current
+controller/border-router topology.
+
+If you are trying to build or flash current firmware, start with:
+
+- [`led-node/`](led-node/) for the ESP32-C6 strip renderer.
+- [`controller-node/`](controller-node/) for the ESP32-C6 Matter
+  controller/commissioner.
+- [`s3-h2-hub-validation/`](s3-h2-hub-validation/) for the retained S3+H2
+  BR-only runbooks.
+
+The completed Rust Wi-Fi/UDP Phase 1/2 implementation is archived on the
+`archive/rust-phase-2` branch and is not part of the active path on this branch.
 
 ## Target
 
@@ -33,6 +45,16 @@ the `archive/rust-phase-2` branch.
   Matter fabric credentials and image signing/encryption are separate security
   layers.
 
+## Current Status
+
+- LED-node and controller-node apps build for `esp32c6`.
+- The selected topology is the split system: S3+H2 board as BR-only plus a
+  separate ESP32-C6 controller.
+- Real Matter group control, durable node config, scheduled scene support, and
+  OTA requestor/provider scaffolding are in the firmware.
+- Multi-node synchronized scheduled activation and functional offline OTA still
+  need the remaining hardware gates.
+
 ## Layout
 
 | Path | Purpose |
@@ -51,18 +73,18 @@ the `archive/rust-phase-2` branch.
 - WS2812 renderer on GPIO2 for `off`, `solid`, and `rainbow`.
 - Vendor custom cluster `0xFFF1FC00` with `SetScene`, `SetNodeConfig`, and
   `SyncClock` command callbacks.
-- Controller-node project skeleton with ESP-Matter controller/commissioner
-  initialization.
+- Controller-node project with ESP-Matter controller/commissioner
+  initialization and standalone operator AP ingress.
 - USB shell helpers:
   - `lo-set-scene`
   - `lo-set-node-config`
   - `lo-sync-clock`
 - Both LED-node and controller-node apps build for ESP32-C6.
-- One LED-node image has been flashed successfully to hardware.
-- One controller-node image has been flashed with USB serial plus private Wi-Fi
-  AP ingress and booted to the controller shell.
+- LED-node images have been flashed successfully to hardware.
+- Controller-node images have been flashed with USB serial plus private Wi-Fi AP
+  ingress and booted to the controller shell.
 
-## Prototype Sequence
+## Bring-Up Sequence
 
 1. Install/export ESP-IDF and ESP-Matter tooling from
    `../docs/requirements.md`.
