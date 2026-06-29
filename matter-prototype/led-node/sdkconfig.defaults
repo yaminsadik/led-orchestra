@@ -35,14 +35,14 @@ CONFIG_LED_ORCHESTRA_NODE_ID=1
 CONFIG_LED_ORCHESTRA_LED_GPIO=2
 # LED_COUNT is the per-node renderer BUFFER CAP (max LEDs any single node can
 # drive), NOT a fleet-wide constant: the same firmware serves a 400-LED node and a
-# 600-LED node. Each node's actual count is provisioned at runtime via SetNodeConfig
+# 900-LED node. Each node's actual count is provisioned at runtime via SetNodeConfig
 # (segment_len, persisted in NVS) and clamped to this cap (see renderer.cpp). Only
 # raise this value + the Kconfig `range` and rebuild if a node must drive MORE LEDs
 # than this. SEGMENT_*/TOTAL below are first-boot defaults until a node is provisioned.
-CONFIG_LED_ORCHESTRA_LED_COUNT=600
+CONFIG_LED_ORCHESTRA_LED_COUNT=900
 CONFIG_LED_ORCHESTRA_SEGMENT_START=0
-CONFIG_LED_ORCHESTRA_SEGMENT_LENGTH=600
-CONFIG_LED_ORCHESTRA_TOTAL_LEDS=600
+CONFIG_LED_ORCHESTRA_SEGMENT_LENGTH=900
+CONFIG_LED_ORCHESTRA_TOTAL_LEDS=900
 
 # LED node is the Matter OTA Requestor: it pulls signed/encrypted images from
 # the hub OTA Provider over the offline Thread fabric (the OTA phase). Keep the
@@ -51,3 +51,17 @@ CONFIG_LED_ORCHESTRA_TOTAL_LEDS=600
 # credentials and firmware image signing/encryption are separate security layers.
 CONFIG_ENABLE_OTA_REQUESTOR=y
 CONFIG_ENABLE_ENCRYPTED_OTA=n
+
+# Brick protection for field-installed nodes. With rollback enabled the bootloader
+# boots a freshly-applied OTA image in PENDING_VERIFY; if the app never confirms it
+# (see the Thread-attach health gate in app_main.cpp) the bootloader reverts to the
+# last-known-good slot on the next reset. This is keep-last-valid extended to
+# firmware: a bad OTA can no longer brick a node we can't reach over USB.
+# NOTE: CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK (secure-version downgrade prevention)
+# stays OFF — it is a field-security item that ships with secure boot / signed
+# images, and enabling it without that flow can permanently lock out recovery.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Point CHIP at the LED-node project config so the Matter device software version
+# comes from CONFIG_LED_ORCHESTRA_SW_VERSION (bump it for every OTA target build).
+CONFIG_CHIP_PROJECT_CONFIG="main/matter_project_config.h"

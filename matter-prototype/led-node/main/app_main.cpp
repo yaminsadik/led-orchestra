@@ -3,6 +3,7 @@
 #include <esp_log.h>
 #include <esp_matter.h>
 #include <esp_matter_console.h>
+#include <esp_ota_ops.h>
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -11,6 +12,9 @@
 #include <app/server/CommissioningWindowManager.h>
 #include <app/server/Server.h>
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
+#include <esp_openthread.h>
+#include <esp_openthread_lock.h>
+#include <openthread/thread.h>
 #include <platform/ESP32/OpenthreadLauncher.h>
 #endif
 
@@ -34,6 +38,59 @@ static void heap_stats_task(void *)
                  (unsigned) heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
+}
+
+// OTA rollback health gate. CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE makes a
+// freshly-applied OTA image boot in PENDING_VERIFY; until the app confirms it,
+// the bootloader will revert to the previous slot on the next reset. We only
+// confirm once the node proves it is operational — OpenThread attached to the
+// mesh. If it never attaches inside the window the image is bad/unreachable, so
+// we deliberately roll back and reboot. For a node bolted to a wall with no USB
+// access this is the difference between a recoverable bad update and a brick.
+// (esp-matter's OTA requestor may also confirm the image; mark-valid is
+// idempotent, so this app-level gate is a safe belt-and-suspenders.)
+static void ota_rollback_health_task(void *)
+{
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state;
+    if (!running || esp_ota_get_state_partition(running, &state) != ESP_OK ||
+        state != ESP_OTA_IMG_PENDING_VERIFY) {
+        // Factory boot or an already-confirmed image: nothing to verify.
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    ESP_LOGW(TAG, "running a PENDING_VERIFY OTA image; awaiting Thread attach before confirming");
+    const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(5 * 60 * 1000);
+    bool attached = false;
+    while (xTaskGetTickCount() < deadline) {
+#if CHIP_DEVICE_CONFIG_ENABLE_THREAD
+        if (esp_openthread_lock_acquire(pdMS_TO_TICKS(1000))) {
+            otDeviceRole role = otThreadGetDeviceRole(esp_openthread_get_instance());
+            esp_openthread_lock_release();
+            if (role == OT_DEVICE_ROLE_CHILD || role == OT_DEVICE_ROLE_ROUTER ||
+                role == OT_DEVICE_ROLE_LEADER) {
+                attached = true;
+                break;
+            }
+        }
+#else
+        attached = true;
+        break;
+#endif
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+
+    if (attached && esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
+        ESP_LOGI(TAG, "OTA image confirmed valid (Thread attached); rollback cancelled");
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    ESP_LOGE(TAG, "new OTA image did not become operational; rolling back to previous slot");
+    esp_ota_mark_app_invalid_rollback_and_reboot();
+    // Unreachable if rollback is enabled; the call reboots into the prior slot.
+    vTaskDelete(nullptr);
 }
 
 using namespace esp_matter;
@@ -130,6 +187,9 @@ extern "C" void app_main()
 #endif
 
     ESP_ERROR_CHECK(esp_matter::start(app_event_cb));
+
+    // Confirm or roll back a freshly-applied OTA image once Thread is up.
+    xTaskCreate(ota_rollback_health_task, "ota_health", 4096, nullptr, tskIDLE_PRIORITY + 1, nullptr);
 
 #if CONFIG_ENABLE_CHIP_SHELL
     esp_matter::console::diagnostics_register_commands();

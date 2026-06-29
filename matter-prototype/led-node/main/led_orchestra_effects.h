@@ -36,6 +36,12 @@ struct LoEffectMeta {
     uint8_t palette_ref;     // index into the palette registry; kNoPalette if none
 };
 
+struct LoPaletteMeta {
+    uint8_t ref;             // append-only palette ref
+    const char *name;        // short stable name
+    const char *description; // human-readable summary
+};
+
 static constexpr uint8_t kNoPalette = 0xFF;
 
 // Registry lookups (append-only; callers must not assume id == array index).
@@ -45,6 +51,9 @@ const LoEffectMeta *led_orchestra_effect_meta(uint8_t effect_id);
 
 // Palette registry — palette references as data. Returns true and fills `out`
 // for a known ref; false for kNoPalette / unknown.
+size_t led_orchestra_palette_count();
+const LoPaletteMeta *led_orchestra_palette_at(size_t index);
+const LoPaletteMeta *led_orchestra_palette_meta(uint8_t palette_ref);
 bool led_orchestra_palette(uint8_t palette_ref, lo::CRGBPalette16 &out);
 
 // Render one pixel for `scene.effect`. Returns the engine color BEFORE the

@@ -13,7 +13,7 @@ config LED_ORCHESTRA_LED_GPIO
 config LED_ORCHESTRA_LED_COUNT
     int "Physical LEDs driven by this node"
     default 60
-    range 1 600
+    range 1 900
 
 config LED_ORCHESTRA_SEGMENT_START
     int "Default segment start in the virtual strip"
@@ -23,12 +23,30 @@ config LED_ORCHESTRA_SEGMENT_START
 config LED_ORCHESTRA_SEGMENT_LENGTH
     int "Default segment length"
     default 60
-    range 1 600
+    range 1 900
 
 config LED_ORCHESTRA_TOTAL_LEDS
     int "Default total virtual strip LEDs"
     default 60
     range 1 65535
+
+config LED_ORCHESTRA_SW_VERSION
+    int "Device software version (Matter OTA)"
+    default 1
+    help
+        The Matter device software version reported in QueryImage and stamped into
+        OTA images. The OTA provider offers an image to a node only when the image
+        version is higher than the node's current version, so bump this for every
+        OTA target build (e.g. build the update image with
+        CONFIG_LED_ORCHESTRA_SW_VERSION=2). Append-only: never reuse/lower a
+        shipped version. See matter-prototype/s3-h2-hub-validation/phase-7-offline-ota.md.
+
+config LED_ORCHESTRA_SW_VERSION_STR
+    string "Device software version string (Matter OTA)"
+    default "1.0.0"
+    help
+        Human-readable software version string reported alongside
+        LED_ORCHESTRA_SW_VERSION. Keep it in step with the numeric version.
 
 config LED_ORCHESTRA_USE_FASTLED
     bool "Back the color/effect engine with real FastLED (hardware-gated spike)"

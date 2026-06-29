@@ -92,12 +92,27 @@ For the full command reference, monitor setup, and group enrollment steps, use
     Each node also needs Group Key Management state and an Access Control ACL
     entry for the group subject; that node-side sequence is the hardware-gated step (see
     [`docs/console.md`](../../docs/console.md#one-time-group-key--enrollment-setup)).
-- **Offline OTA Provider scaffold (build-gated, `CONFIG_LED_ORCHESTRA_ENABLE_OTA_PROVIDER`,
-  default off):** OTA Provider cluster on the root endpoint + `lo-ota-status`,
-  `lo-ota-enable`, `lo-ota-disable`, `lo-ota-set-image`. Enabling it needs the
-  Matter server + the `esp_matter_ota_provider` component with DCL disabled and a
-  hub-local image endpoint — see the Phase 7 runbook
+- **Offline OTA Provider (build-gated, `CONFIG_LED_ORCHESTRA_ENABLE_OTA_PROVIDER`,
+  default off):** OTA Provider endpoint `1` + `lo-ota-status`,
+  `lo-ota-grant-access`, `lo-ota-enable`, `lo-ota-disable`, and
+  `lo-ota-set-image <http-uri> <sw-version> <version-string> <size> <vendor-id>
+  <product-id>`. Backed by `lo_ota_provider`
+  ([`components/lo_ota_provider/`](components/lo_ota_provider/)) — our offline fork
+  of esp-matter's `esp_matter_ota_provider` with the DCL candidate fetch and forced
+  TLS download removed: `lo-ota-set-image` registers a **local** candidate and the
+  provider streams the image over plain HTTP from a hub-local control-LAN endpoint
+  (operator laptop now, Kubernetes-served later). The provider BDX handler is
+  registered on both the Matter server ExchangeManager and the controller
+  `DeviceControllerFactory` ExchangeManager; the latter is the path used by an
+  already-commissioned requestor's `BDX:ReceiveInit`. Enabling it also needs the
+  Matter server — see the Phase 7 runbook
   [`../s3-h2-hub-validation/phase-7-offline-ota.md`](../s3-h2-hub-validation/phase-7-offline-ota.md).
+  Because this build hosts two full CHIP stacks (server + commissioner) on one C6,
+  it is RAM-bound: the overlay disables OpenThread BR (`OPENTHREAD_BORDER_ROUTER=n`;
+  the S3+H2 is the BR) and BLE (`BT_ENABLED=n`; this build never BLE-commissions)
+  and shrinks the Wi-Fi softAP buffers to keep `controller.init()` and the AP from
+  running out of heap. See the 2026-06-28 `controller.init()` OOM entry in
+  [`../../docs/debugging-journal.md`](../../docs/debugging-journal.md).
 - **Historical (not selected):** an S3+OTBR build path for this app — a committed
   `sdkconfig.controller-node.s3-otbr.defaults` overlay and a UART-RCP variant of
   `main/esp_ot_config.h` — lives in

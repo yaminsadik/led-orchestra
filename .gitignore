@@ -14,3 +14,4 @@ docs/handoff*.md
 # Generated build outputs
 build*/
 **/build*/
+*.ota

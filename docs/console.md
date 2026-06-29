@@ -78,9 +78,11 @@ Registered in `main/led_orchestra_console.cpp`. They send the custom cluster
 `0xFFF1FC00`. Destination is a Matter node id (unicast) or a group id; the
 all-nodes group is `0x0001`. Effect ids: `0` off, `1` solid, `2` rainbow,
 `3` fibonacci (per-pixel R/G/B are consecutive Fibonacci numbers mod 256 down the
-strip; scrolls with `speed`, ignores the RGB fields), `4` aurora breathe (soft
-overlapping color waves with a breathing intensity curve; scrolls with `speed`,
-ignores the RGB fields).
+strip; scrolls with `speed`, ignores RGB), `4` aurora breathe (soft overlapping
+palette waves with a breathing intensity curve; scrolls with `speed`, ignores
+RGB), `5` comet (RGB comet tail), `6` theater chase (RGB chase), `7` palette
+cycle (aurora gradient; ignores RGB), and `8` twinkle (deterministic RGB
+twinkles).
 
 ```text
 lo-set-scene <node-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]
@@ -204,18 +206,32 @@ runbook). They drive the local Matter OTA Provider.
 
 ```text
 lo-ota-status
+lo-ota-grant-access <node-id>
 lo-ota-enable <node-id> [once]
 lo-ota-disable <node-id>
-lo-ota-set-image <uri-or-path> <software-version> <version-string> <size>
+lo-ota-set-image <http-uri> <software-version> <version-string> <size> <vendor-id> <product-id>
 ```
 
-- `lo-ota-status` — show provider state + the recorded local image candidate.
+- `lo-ota-status` — show provider state, provider endpoint, endpoint table,
+  Interaction Model provider diagnostics, accepted commands, and the staged local
+  image candidate. The current provider endpoint is `1`; use endpoint `1` in
+  `AnnounceOTAProvider`.
+- `lo-ota-grant-access` — add/verify a controller-side ACL entry that allows the
+  LED node to invoke the OTA Provider cluster over CASE with Operate privilege.
 - `lo-ota-enable` / `lo-ota-disable` — allow/deny a specific node's OTA (default
   is DENY; a node must have sent a QueryImage once for an enable to take effect).
-- `lo-ota-set-image` — record the local image the hub intends to serve. Serving
-  the bytes needs a hub-local image endpoint (the stock provider fetches over
-  HTTP from the candidate URL) — see the Phase 7 runbook for the remaining
-  offline plumbing. Offline-first: never a DCL/internet URL in the product path.
+- `lo-ota-set-image` — stage the local image and register it with the provider so
+  a matching node's QueryImage is answered offline. `<vendor-id>`/`<product-id>`
+  are the requestor's 16-bit Matter ids (the image is offered to any node of that
+  type currently below `<software-version>`). `<http-uri>` is a **hub-local HTTP**
+  URL on the control LAN — an operator laptop today, a Kubernetes-served endpoint
+  later; only the URL changes. The provider's offline fork
+  (`components/lo_ota_provider/`) streams the bytes from there over plain HTTP — no
+  DCL, no internet, no TLS-to-the-cloud. Set `<size>` to the `.ota` byte size (or
+  `0` to let the requestor learn it from the image header). The controller must
+  have an IP route to this URL; the current provider-on bench build has operator
+  Wi-Fi disabled, so a laptop `192.168.x.x` URL is not reachable until Wi-Fi STA,
+  AP/NAT, or another reachable image-serving path is enabled.
 
 ## Typical Bring-up Flow
 

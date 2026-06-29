@@ -113,6 +113,83 @@ voltage/timing margin gets bad enough that downstream pixels decode or display
 the wrong color. Injecting power at both ends of the single strip and measuring
 voltage at the start, midpoint, and end should be the next single-strip test.
 
+### Two-Strip Green Retest With New Adapter
+
+After reconnecting the second 150-LED strip and using the newer power setup,
+solid green was stepped upward over the all-nodes group:
+
+```text
+lo-set-scene-group 0x0001 1 00ff00 0 51
+lo-set-scene-group 0x0001 1 00ff00 0 80
+lo-set-scene-group 0x0001 1 00ff00 0 112
+lo-set-scene-group 0x0001 1 00ff00 0 128
+lo-set-scene-group 0x0001 1 00ff00 0 120
+```
+
+Observed behavior:
+
+- `51/255`: all green across both strips.
+- `80/255`: all green across both strips.
+- `112/255`: all green across both strips.
+- `128/255`: mostly green, but the end of strip 2 changed color; visually about
+  60% of the two-strip chain looked good before the far-end failure.
+- `120/255`: all green across both strips.
+
+This brackets the current two-strip green threshold between `120` and `128`.
+Because the failure starts at the far end of strip 2 and improves immediately
+when brightness is reduced, this does not look like a Matter endpoint/config
+issue. It fits voltage drop, weak ground reference, or data margin degraded by
+strip-2 load. Next planned hardware change: inject a separate `12V 3A` supply at
+the beginning of strip 2, with grounds tied together and the data path left as
+`strip 1 DOUT -> strip 2 DIN`.
+
+### Wiring Retest With Beginning-Only Injection
+
+After changing the wiring so power could only be added at the beginning of strip
+1, the same solid green group commands were sent as a brightness ladder:
+
+```text
+lo-set-scene-group 0x0001 1 00ff00 0 128
+lo-set-scene-group 0x0001 1 00ff00 0 192
+lo-set-scene-group 0x0001 1 00ff00 0 255
+```
+
+Observed behavior:
+
+- `128/255`: initially looked good after reconnecting, but later repeated
+  PDU-only tests showed it is marginal/intermittent; the last few percent of the
+  downstream chain can still break color.
+- `192/255`: same failure as before; mixed colors start on strip 2.
+- `255/255`: remains above the usable power margin for this wiring.
+- A third strip was physically present downstream during this retest and behaved
+  the same as before. Treat strip-3 observations cautiously until the live Matter
+  node config is explicitly updated/read back for `450` LEDs; the last documented
+  config still targeted `300` LEDs.
+
+Follow-up PDU-only threshold search:
+
+```text
+lo-set-scene-group 0x0001 1 00ff00 0 192
+lo-set-scene-group 0x0001 1 00ff00 0 153
+lo-set-scene-group 0x0001 1 00ff00 0 140
+lo-set-scene-group 0x0001 1 00ff00 0 128
+lo-set-scene-group 0x0001 1 00ff00 0 120
+```
+
+Observed behavior:
+
+- `192/255`: mixed colors on strip 2.
+- `153/255` (about 60%): still mixed.
+- `140/255` (about 55%): still mixed.
+- `128/255` (about 50%): almost good, but intermittent; the last ~5% can still
+  break.
+- `120/255`: good.
+
+This makes `120/255` the current practical green threshold for the PDU-only /
+beginning-only injection setup. Since every value above `120` tested so far can
+reintroduce mixed colors downstream, the limiting factor is still power/ground
+or data margin along the strip chain rather than endpoint addressing.
+
 ## What Was Fixed
 
 ### Static Scene Over-Refresh
@@ -224,6 +301,10 @@ injection point were used for that specific test.
 
 ## 65 Ft 16 AWG Run Finding
 
+The PDU bench path is about 65 ft away from the LED load. Treat this as the
+worst-case venue run: if a wiring/power approach is stable here, shorter PDU
+runs should be easier.
+
 Do not run the 12V LED load over the old 65 ft 16 AWG cable.
 
 16 AWG is roughly 4 ohms per 1000 ft. A 65 ft one-way power run is roughly 130 ft
@@ -244,6 +325,101 @@ Approximate voltage drop:
 On a 12V strip, that is enough to make the far end dim, miscolor, flicker, or
 reset its pixel decoding. The long run should carry AC to a supply near the
 strips, not high-current low-voltage DC.
+
+The current product direction is to host LED-node electronics in/near the PDUs,
+but the WS281x-style LED data path should still be treated as a short, fragile
+single-ended signal unless proven otherwise. A raw 65 ft GPIO-to-DIN data wire is
+not the preferred architecture; if it is tested, treat it as a controlled
+experiment with a fallback to a differential line driver or moving the C6 closer
+to the strip input.
+
+### 65 Ft Data-Wire Experiment
+
+The long-run data experiment used roughly the same worst-case PDU distance
+(about 65 ft, possibly a little more). The C6 stayed at the PDU end, the strip
+ground was referenced back through the PDU power ground, and the LED data line
+was carried over a 16 AWG wire.
+
+Test commands:
+
+```text
+# Solid green at the current safe PDU-only threshold
+lo-set-scene-group 0x0001 1 00ff00 0 120
+
+# Animated effects over the same long data run
+lo-set-scene-group 0x0001 4 000000 24 120
+lo-set-scene-group 0x0001 4 000000 8 120
+lo-set-scene-group 0x0001 4 000000 4 80
+lo-set-scene-group 0x0001 2 000000 1 80
+lo-set-scene-group 0x0001 2 000000 0 80
+```
+
+Observed behavior:
+
+- Solid green at `120/255` worked over the 65 ft 16 AWG data run.
+- Aurora/rainbow effects flickered or looked visually broken even after reducing
+  speed and brightness.
+- The firmware currently treats rainbow/aurora as animated even when speed is
+  sent as `0`, so those effects continuously refresh the WS281x data stream.
+  Solid scenes render once and then hold the strip's latched state.
+
+Conclusion for now: the 65 ft 16 AWG raw data run is acceptable for solid scenes
+in this worst-case bench setup, but animated effects expose data-signal margin.
+Do not commit to RS-485/differential drivers yet: shorter venue runs may not need
+them, and adding receivers/transmitters everywhere would be unnecessary cost and
+complexity if only the longest PDU path fails animation. Keep this path on solid
+scenes for now and revisit Cat6 twisted-pair or RS-485 only when the hardware
+layout decision is being made.
+
+### 9 m Junction-Box Data-Run Experiment
+
+For the junction-box C6 placement candidate, the longest expected
+junction-box-to-strip data run is about 9 m (~30 ft), much shorter than the
+PDU-to-strip worst case. The test moved the data source to the junction-box
+position and used the longest 16 AWG data run from there to the strip.
+
+Test commands:
+
+```text
+# Animated rainbow stress test
+lo-set-scene-group 0x0001 2 000000 1 80
+
+# Same animation at lower brightness
+lo-set-scene-group 0x0001 2 000000 1 50
+
+# After ground/power fixes
+lo-set-scene-group 0x0001 2 000000 1 128
+lo-set-scene-group 0x0001 2 000000 1 255
+lo-set-scene-group 0x0001 2 000000 1 224
+```
+
+Observed behavior:
+
+- At `80/255`, strip 1 rendered the rainbow effect well. Strip 2 rendered the
+  effect but flickered starting around 40% into the strip.
+- At `50/255`, the flicker mostly stopped, leaving only some flicker near the
+  far end of strip 2 (around the last ~3%).
+- Disconnecting the extra `12V` feed did not reintroduce the original failure by
+  itself. Tying strip 2 ground solidly to strip 1 ground stopped most of the
+  flicker. This confirmed that the strip-to-strip ground reference at the data
+  handoff was a primary issue.
+- At `128/255`, after the strip-to-strip ground fix, only some flicker remained
+  near the end of strip 2.
+- Adding the extra PDU-side power conductors for strip 2 to the strip 1 feed
+  (same source/common ground) cleared the remaining strip-2 flicker.
+- After both fixes, `255/255` rainbow was sent as a max stress test. It still
+  showed slight, barely noticeable flicker near the far end.
+- `224/255` rainbow was better than `255`: one rare/random flicker was observed,
+  then it ran without obvious flicker. Treat `224` as the current practical high
+  test point, not a final production brightness cap; the cap should be decided
+  later with more hardware evidence.
+
+Conclusion: the 9 m junction-box-to-strip data run is electrically viable. The
+flicker was not caused by the 9 m data path; it was caused by a weak strip-to-strip
+ground reference first, then by remaining power/ground margin on strip 2. The
+required wiring invariant is `strip 1 DOUT -> strip 2 DIN` plus a solid
+`strip 1 GND -> strip 2 GND` reference at the handoff, with the extra PDU-side
+power conductors tied into the same source/common-ground system when needed.
 
 ## Recommended Wiring
 
@@ -307,9 +483,10 @@ If a single strip changes color halfway only at high brightness:
 
 1. Keep the close-range power setup; do not use the 65 ft 12V run.
 2. Measure voltage at the power supply, strip 1 input, strip 2 input, and far end
-   while running `80`, `112`, `128`, and `255`.
-3. Treat `112` as the current known-good upper threshold.
-4. If voltage at strip 2 or the far end drops significantly at `128`, improve
+   while running `80`, `112`, `120`, `128`, `192`, and `255`.
+3. Treat `120` as the current known-good PDU-only / beginning-only injection
+   threshold; treat `128` as marginal/intermittent, not safe.
+4. If voltage at strip 2 or the far end drops significantly at `128` or above, improve
    injection wiring or use a larger supply.
 5. If voltage remains near 12V but colors are still wrong, focus on the data
    chain and level shifting.

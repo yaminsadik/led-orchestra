@@ -27,5 +27,13 @@
 // No-op (returns ESP_OK) when the build option is disabled.
 esp_err_t led_orchestra_ota_provider_init();
 
+// Re-bind the OTA Provider delegate after esp_matter::start() has enabled the
+// dynamic endpoint and created the codegen OTA Provider server object.
+esp_err_t led_orchestra_ota_provider_bind_delegate();
+
+// Register OTA BDX handling on the controller stack's ExchangeManager. The
+// commissioner/controller runtime owns a separate manager from the Matter server.
+esp_err_t led_orchestra_ota_provider_bind_controller_exchange();
+
 // Register the `lo-ota-*` operator console commands. No-op when disabled.
 esp_err_t led_orchestra_ota_provider_register_commands();

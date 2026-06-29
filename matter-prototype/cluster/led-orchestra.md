@@ -19,6 +19,14 @@ Matter.
     static gradient). Ignores the `red`/`green`/`blue` fields.
   - `4`: aurora breathe — soft overlapping RGB waves with a breathing intensity
     curve; scrolls with `speed` and ignores the `red`/`green`/`blue` fields.
+  - `5`: comet — single-color comet with a smooth fading tail; scrolls with
+    `speed` and uses `red`/`green`/`blue`.
+  - `6`: theater chase — three-phase single-color chase pattern; scrolls with
+    `speed` and uses `red`/`green`/`blue`.
+  - `7`: palette cycle — aurora palette gradient across the virtual strip;
+    scrolls with `speed` and ignores the `red`/`green`/`blue` fields.
+  - `8`: twinkle — deterministic sparse single-color twinkles keyed by global
+    LED index and synchronized time; uses `red`/`green`/`blue`.
 
 Use the private development VID/PID during prototypes. Do not allocate final
 cluster ids or certification metadata until the Matter product direction is

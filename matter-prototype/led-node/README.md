@@ -26,7 +26,8 @@ with `lo-set-node-config`.
 
 - Builds for `esp32c6`.
 - Runs as a Thread Matter device, not as a Wi-Fi station.
-- Renders `off`, `solid`, `rainbow`, `fibonacci`, and `aurora-breathe`.
+- Renders `off`, `solid`, `rainbow`, `fibonacci`, `aurora-breathe`, `comet`,
+  `theater-chase`, `palette-cycle`, and `twinkle`.
 - Persists accepted node config in NVS with magic/version/CRC validation.
 - Supports scheduled `SetScene` promotion using `SyncClock` time offsets.
 - Includes Matter OTA Requestor support and OTA app partitions.
@@ -68,8 +69,14 @@ with `lo-set-node-config`.
   and palette references (palettes are data). `SetScene` rejects unknown effect
   ids via the registry and keeps the last valid scene. No runtime-uploaded effect
   code — new effect behavior ships as compiled firmware via OTA.
-- `SetScene` renders `off`, `solid`, `rainbow`, `fibonacci`, and `aurora-breathe`.
-  A scheduled `SetScene` (non-zero start) is staged and promoted at the
+- **Palette registry**: append-only palette refs currently include `0` aurora,
+  `1` ember, `2` ocean, `3` coral, `4` jungle, `5` ice, `6` neon-party,
+  `7` gold-score, and `8` maintenance-white-blue. These are data palettes for
+  compiled effects and future declarative bundles; changing effect behavior still
+  ships through OTA.
+- `SetScene` renders `off`, `solid`, `rainbow`, `fibonacci`, `aurora-breathe`,
+  `comet`, `theater-chase`, `palette-cycle`, and `twinkle`. A scheduled
+  `SetScene` (non-zero start) is staged and promoted at the
   synchronized start time; the node keeps rendering its active scene until then
   (keep-last-valid — a scheduled change never blanks a running show).
 - **Durable `SetNodeConfig`**: accepted segment config is persisted in NVS
@@ -80,16 +87,24 @@ with `lo-set-node-config`.
 - `SyncClock` stores a controller-time offset used for scheduled scenes.
 - Acts as a **Matter OTA Requestor** (`CONFIG_ENABLE_OTA_REQUESTOR=y`); the
   requestor cluster is auto-created by `esp_matter::start()` and the `ota_0`/
-  `ota_1`/`otadata` partitions are in [`partitions.csv`](partitions.csv).
+  `ota_1`/`otadata` partitions are in the N8 layout
+  [`partitions-8mb.csv`](partitions-8mb.csv).
+- **Brick-safe OTA:** `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` plus a
+  Thread-attach **health gate** in [`main/app_main.cpp`](main/app_main.cpp) — a
+  freshly-applied image is confirmed only after OpenThread attaches, else the
+  bootloader reverts to the previous slot. A bad OTA cannot brick a wall-mounted
+  node. The device software version is set from `CONFIG_LED_ORCHESTRA_SW_VERSION`
+  (via [`main/matter_project_config.h`](main/matter_project_config.h)) so OTA target
+  images bump it without editing source.
 
 ## Flash Headroom (watch this)
 
-The LED-node app is **~2% free** in each `0x1E0000` OTA app slot (`ota_0`/`ota_1`)
-on the 4 MB C6 as of this build — the Matter/Thread stack dominates. OTA needs the
-new image to fit a slot, so this is tight: before adding much more (notably the
-real-FastLED engine spike, which would not currently fit), budget size work —
-trim build options (log levels, unused clusters), enable size optimization, or
-revisit the 4 MB partition split. Record `idf.py size` deltas when adding code.
+On the deployment-standard **N8 (8 MB)** layout the app (~1.84 MB) sits in **3 MB
+OTA slots (~39% free)** — comfortable, vs the ~2% free on the retired 4 MB layout
+(see [`../../docs/led-node-flash-sizing-decision.md`](../../docs/led-node-flash-sizing-decision.md)).
+OTA still needs the new image to fit a slot, so record `idf.py size` deltas when
+adding code (notably the real-FastLED engine spike). The 4 MB
+[`partitions.csv`](partitions.csv) remains for any N4 units.
 
 ## Config Targets
 

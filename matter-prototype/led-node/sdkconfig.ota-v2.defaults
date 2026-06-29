@@ -1,0 +1,22 @@
+# LED-node OTA TARGET image overlay (Phase 7 bench proof / version bumps).
+#
+# Builds a "v2" LED-node image to update a running v1 node over Matter/Thread.
+# Layer it over sdkconfig.defaults in a SEPARATE build dir so the v1 baseline
+# build is untouched:
+#
+#   idf.py -B build-ota-v2 \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ota-v2.defaults" \
+#     -D SDKCONFIG=build-ota-v2/sdkconfig set-target esp32c6 build
+#
+# Then wrap the app binary into a Matter .ota image (the requestor compares the
+# image's version against its current one), e.g.:
+#
+#   python $IDF_PATH/../esp-matter/connectedhomeip/connectedhomeip/src/app/ota_image_tool.py \
+#     create -v 0xFFF1 -p 0x8000 -vn 2 -vs "2.0.0" -da sha256 \
+#     build-ota-v2/led_orchestra_matter_led_node.bin led-node-v2.ota
+#
+# Serve led-node-v2.ota with lo-ota-image-server.py and stage it on the hub with
+# lo-ota-set-image <url> 2 2.0.0 <size> 0xFFF1 0x8000. Append-only: never reuse or
+# lower a shipped version.
+CONFIG_LED_ORCHESTRA_SW_VERSION=2
+CONFIG_LED_ORCHESTRA_SW_VERSION_STR="2.0.0"

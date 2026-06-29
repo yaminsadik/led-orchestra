@@ -94,6 +94,15 @@ enum EffectId : uint8_t {
     // Soft overlapping RGB waves with a global breathe curve. Designed to avoid
     // hard primary-only bands on sparse/short bench strips.
     kEffectAuroraBreathe = 4,
+    // Single-color FastLED-style comet with a fading tail. Uses RGB + speed.
+    kEffectComet = 5,
+    // Single-color three-phase chase pattern. Uses RGB + speed.
+    kEffectTheaterChase = 6,
+    // Palette gradient that scrolls through the virtual strip. Ignores RGB.
+    kEffectPaletteCycle = 7,
+    // Deterministic sparse twinkles, segment-safe because the sparkle field is
+    // derived from global index + synchronized time rather than local RNG state.
+    kEffectTwinkle = 8,
 };
 
 } // namespace matter

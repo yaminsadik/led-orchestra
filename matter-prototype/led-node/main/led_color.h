@@ -42,12 +42,20 @@ using ::blend;
 using ::ColorFromPalette;
 using ::cos8;
 using ::nblend;
+using ::qadd8;
+using ::qsub8;
 using ::scale8;
 using ::scale8_video;
 using ::sin8;
 using ::triwave8;
 inline uint8_t triangle8(uint8_t x) { return ::triwave8(x); }
 inline uint8_t ease8(uint8_t x) { return ::ease8InOutQuad(x); }
+inline CRGB hsv_to_rgb(const CHSV &hsv)
+{
+    CRGB rgb;
+    ::hsv2rgb_rainbow(hsv, rgb);
+    return rgb;
+}
 } // namespace lo
 
 #else // dependency-free FastLED-compatible backend

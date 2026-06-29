@@ -30,14 +30,28 @@ in order: [docs/architecture.md](docs/architecture.md),
   Pi `ot-br-posix` stays the last-resort fallback.
 - **Kubernetes** is the off-board control plane (authoring/validation/scheduling
   of declarative program bundles); the hub stays thin and only caches/relays.
-- **Current implementation work:** the selected split topology has now passed
-  recovery work (Stage D) and real multi-node Matter group control (Phase 5) on
-  hardware. Next work is synchronized scheduled scenes, durable config proof,
-  scale/soak, and offline OTA on that selected split architecture. Runbooks +
-  committed config:
-  [matter-prototype/s3-h2-hub-validation/](matter-prototype/s3-h2-hub-validation/).
-  See [docs/controller-topology-validation.md](docs/controller-topology-validation.md)
-  and the 2026-06-09/10 entries in
+- **Current implementation work:** the selected split topology has passed recovery
+  (Stage D), real multi-node Matter group control (Phase 5), and the Phase 6
+  hardware gate. **Offline OTA (Phase 7) is implemented**: LED-node requestor +
+  app rollback + Thread-attach health gate, and an offline provider fork
+  (`controller-node/components/lo_ota_provider/`, DCL/TLS removed; local candidate
+  + plain-HTTP control-LAN image source). The provider-on controller builds and
+  the provider cluster boots on hardware, but the co-located build (server +
+  commissioner = two full CHIP stacks on one C6) is **RAM-bound**: `controller.init()`
+  crash-looped with `CHIP_ERROR_NO_MEMORY` until the overlay dropped OpenThread BR
+  (S3+H2 is the BR) and BLE (this build never BLE-commissions) and shrank the Wi-Fi
+  softAP buffers — see the 2026-06-28 OOM journal entry. **What remains:** confirm
+  the slimmed build boots past Wi-Fi init (blocked on bench reconnect), the
+  end-to-end OTA transfer proof (a commissioned node downloads + applies an image
+  over Thread), the bad-image rollback proof, then the field-security layer
+  (secure boot / flash encryption / signed images). Note: the provider-on
+  controller can't BLE-commission (single-role BLE, and BLE is now off for heap) —
+  commission with the commissioner-only build, then add the provider; OTA rides Thread.
+  Runbooks + committed config:
+  [matter-prototype/s3-h2-hub-validation/](matter-prototype/s3-h2-hub-validation/)
+  (see `phase-7-offline-ota.md`).
+  See [docs/controller-topology-validation.md](docs/controller-topology-validation.md),
+  the 2026-06-09/10 entries, and the 2026-06-27/28 OTA entries in
   [docs/debugging-journal.md](docs/debugging-journal.md).
 
 ## Invariants (do not break)

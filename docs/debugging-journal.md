@@ -1641,3 +1641,364 @@ frame cadence.
   power-injection issues.
 - If animated effects twitch on long strips, test lower frame rate, RMT timing
   tolerance, level shifting, and data-wire routing before changing Matter logic.
+
+## 2026-06-26 - Phase 6 Bench: Discriminator Collision And Stale CASE
+
+### Context
+
+Phase 6 was proven on the selected split topology with the S3+H2 board as
+BR-only, one C6 controller, and two C6 LED nodes. The successful gate included
+durable `NodeConfig` reload after LED-node reset, group membership for both
+nodes, immediate group `SetScene`, and synchronized scheduled group activation.
+
+### What Failed
+
+The first BLE-Thread pairing attempt reached the wrong device: the S3 BR was
+still advertising the default test discriminator `3840`, so the controller opened
+PASE/AddNOC against the BR instead of the intended LED node.
+
+Later, group provisioning immediately after LED-node reset hit stale operational
+CASE sessions and timed out even though the nodes had rejoined Thread and were
+advertising operational SRP records.
+
+### Resolution
+
+For commissioning, close or avoid any non-target commissioning windows before
+sending `pairing ble-thread`, or give production devices unique
+discriminators/passcodes.
+
+For group provisioning and proof after LED-node reset, reset the C6 controller
+once to clear stale CASE/session state. After that reset, the same
+Group Key Management `KeySetWrite`, GroupKeyMap, Groups `AddGroup`, and ACL
+write sequence succeeded cleanly for both nodes.
+
+### Lessons
+
+- Do not trust default discriminator `3840` on a mixed bench. Make the intended
+  commissioning target unambiguous.
+- After LED-node reset, reset the controller before group provisioning or
+  group-control proof. It avoids chasing stale CASE timeouts as if they were
+  Thread, SRP, or group-key failures.
+- Phase 6 proof should be judged from node logs and physical behavior:
+  `config loaded from NVS`, multicast group join, group scene sequence received,
+  and scheduled scene activation on all nodes.
+
+## 2026-06-27 — Provider-on Controller Can't BLE-Commission (single-role BLE)
+
+### Symptom
+
+After building/flashing the **provider-on** controller (commissioner + Matter
+data-model server, to host the OTA Provider cluster), `matter esp controller
+pairing ble-thread <node> <dataset> <pin> <disc>` runs but produces **no
+`chip[CTL]`/`chip[BLE]` logs and no `Done`**, and the node is never reachable
+(`read-attr` errors). The commissioning log tags were confirmed raised to INFO,
+so the silence is real: commissioning never engages.
+
+### Architecture At The Time
+
+Phase 7 OTA bring-up. The OTA Provider cluster requires
+`CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER=y`. So the controller is simultaneously a
+Matter **commissioner** (BLE central — scan/connect) and a Matter **server** that
+advertises itself as a **commissionable** device (BLE peripheral). The proven
+Phase 5/6 commissioner ran with the server OFF, so BLE was free for central use.
+
+### What Worked
+
+- Provider-on build compiles and fits; OTA Provider cluster is live (`lo-ota-status`).
+- The controller joins the BR's Thread network and reaches `router` state.
+- The **target node advertises connectable CHIPoBLE the entire time** (watched on
+  its own serial: fast advertising for 30 s, then slows) — it is discoverable.
+
+### What Failed
+
+The controller never opens a BLE connection to the advertising node. Commissioning
+produces zero BLE/CTL activity.
+
+### Hypotheses And Experiments
+
+| Hypothesis | Experiment | Result |
+| --- | --- | --- |
+| Stale node NVS (repurposed C6) confused the commissioner | Erase `nvs` region, retry | Cleared boot DNS-SD errors; commissioning still silent |
+| Server's self commissioning window blocks BLE | Close window on `kCommissioningWindowOpened` in `app_main.cpp`; rebuild/reflash | Self-advertising stops, but commissioner BLE central still never connects |
+| Clean re-flash needed | Full `erase_flash` + reflash provider-on | Boot errors identical → they are inherent to the build, not stale state |
+| BLE is single-role: server peripheral vs commissioner central | Trigger pairing, watch node serial | Node advertises throughout, controller never connects → confirmed |
+
+### Decisive Evidence
+
+With the controller running the provider-on build, the node logged continuous
+`CHIPoBLE advertising started` / GAP advertise during the whole 35 s pairing
+window with **no** incoming connection, PASE, or session — while the controller
+emitted nothing. esp-matter's BLE layer does not service a commissioner
+(central) role while the server holds the commissionable (peripheral) role.
+
+### Resolution
+
+Do **not** BLE-commission from the provider-on build. OTA rides Thread/CASE, not
+BLE, so the correct flow is: **commission each node once with the commissioner-only
+build** (server off → BLE central free), **then reflash the controller to
+provider-on *without erasing NVS*** (fabric + commissioned nodes survive; identical
+`nvs`/`nvs_keys`/`esp_secure_cert` offsets), and OTA over Thread. The end-to-end
+transfer + rollback proof against an already-commissioned node remains to run.
+
+### Lessons
+
+- The "provider-on is an unvalidated gate" warning in
+  [`../matter-prototype/s3-h2-hub-validation/phase-7-offline-ota.md`](../matter-prototype/s3-h2-hub-validation/phase-7-offline-ota.md)
+  was right — the gate caught a real commissioner/server BLE conflict.
+- Commission-then-add-provider is the deployment-accurate flow anyway: you
+  commission during setup and field-update over the air.
+- Two side-findings during the same bring-up:
+  - **esp-matter v1.4.2 ClosureControl/ClosureDimension cluster servers fail to
+    compile** when the Matter server is enabled (missing `operator==` on
+    `GenericOverallCurrentState`). Exclude unused clusters via cluster-select
+    (`CONFIG_SUPPORT_CLOSURE_*_CLUSTER=n`).
+  - `sdkconfig.defaults` only fills **missing** values; to change a key already in
+    a build dir's generated `sdkconfig`, delete that `sdkconfig` (or use a fresh
+    `-D SDKCONFIG=<builddir>/sdkconfig` so the proven default isn't clobbered).
+  - The LED node advertises **pid `0x8000`** (esp-matter default), not `0x8001`;
+    use `0xFFF1`/`0x8000` for `lo-ota-set-image` and the `.ota` wrap.
+
+### Follow-Up
+
+Run the transfer proof (commissioned node downloads + applies v1→v2 over Thread)
+and the bad-image rollback proof, then mark OTA functional / install-ready.
+
+## 2026-06-28 — OTA Provider IM, ACL, And BDX Dispatch Fixed; Blocked On Image URL Reachability
+
+### Starting Symptom
+
+After the provider-on controller was flashed with NVS/fabric preserved, the LED
+node received `AnnounceOTAProvider` and sent `QueryImage` to endpoint `1`, cluster
+`0x0029`, command `0`, but the controller returned status `0x7f`.
+
+Important decode correction: `0x7f` is `UnsupportedEndpoint`, not
+`UnsupportedCommand`. Later `0x7e` was `UnsupportedAccess`, not
+`UnsupportedCommand`.
+
+### Fixes Applied
+
+- The OTA Provider now lives on a real provider endpoint (`1`), not root endpoint
+  `0`.
+- `lo-ota-status` now prints endpoint table diagnostics, the active/codegen
+  Interaction Model data-model provider pointers, the codegen registry server, and
+  accepted commands for endpoint `1`, cluster `0x0029`.
+- `esp_matter_controller_client.cpp` preserves the server/codegen data-model
+  provider instead of replacing the active Interaction Model provider with the
+  controller-only provider. That fixed `UnsupportedEndpoint`.
+- `lo-ota-grant-access <node-id>` installs/verifies the provider-side ACL entry
+  that lets the LED node invoke the OTA Provider cluster over CASE with Operate
+  privilege. That fixed `UnsupportedAccess`.
+- The OTA Provider delegate is rebound after `esp_matter::start()`, and the BDX
+  handler is registered after controller setup.
+- The key BDX routing fix: the commissioner+server build has two ExchangeManagers.
+  Registering BDX `ReceiveInit` on `chip::Server::GetInstance().GetExchangeManager()`
+  was not enough; the already-commissioned requestor's `BDX:ReceiveInit` arrives on
+  the controller `DeviceControllerFactory` ExchangeManager. The OTA BDX sender is
+  now registered on both.
+
+### Hardware Evidence
+
+Provider endpoint and IM provider are now correct:
+
+```text
+provider endpoint: 1
+ember endpoints  : count=16
+[0] endpoint=0 enabled=yes ota-provider=no
+[1] endpoint=1 enabled=yes ota-provider=yes
+IM provider ptr  : active=0x40816ca4 codegen=0x40816ca4
+accepted commands: err=OK count=3 0x00000000 0x00000002 0x00000004
+```
+
+`QueryImage` reaches the provider:
+
+```text
+DBG CheckCommandExistence provider=0x40816ca4 ep=1 cluster=0x0000_0029 command=0x0000_0000 accepted_err=0 count=3
+DBG Codegen Invoke ep=1 cluster=0x0000_0029 command=0x0000_0000 registry=0x4081b558
+DBG OtaProviderServer::InvokeCommand ep=1 cluster=0x0000_0029 command=0x0000_0000
+DBG OtaProviderLogic::QueryImage ep=1 delegate=0x40847500
+```
+
+The two-ExchangeManager finding:
+
+```text
+DBG RegisterUMH new this=0x4081f8f8 protocol=(0, 2) type=4 handler=0x4084750c
+registered BDX ReceiveInit handler 0x40847508 on exchange manager 0x4081f8f8
+...
+DBG RegisterUMH new this=0x40870e38 protocol=(0, 2) type=4 handler=0x4084750c
+registered BDX ReceiveInit handler 0x40847508 on exchange manager 0x40870e38
+OTA BDX handler bound on controller exchange manager 0x40870e38
+```
+
+Clean BDX dispatch proof:
+
+```text
+ota_provider: Bdx Sender will query the OTA image from http://192.168.1.74:8070/led-node-v2.ota
+DBG unsolicited handler match protocol=(0, 2) type=4 handler=0x4084750c
+DBG TransferFacilitator::OnMessageReceived ec=23390r type=0x4 protocol=(0, 2)
+```
+
+### Current Blocker
+
+The current failure is not Thread, CASE, Interaction Model validation, ACL, or BDX
+handler routing. The provider is trying to fetch the staged image over HTTP and
+the controller cannot route to the laptop IPv4 address:
+
+```text
+esp-tls: [sock=54] connect() error: Host is unreachable
+HTTP_CLIENT: Connection failed, sock < 0
+ota_provider: Failed to open HTTP connection: ESP_ERR_HTTP_CONNECT
+```
+
+This matches the local provider-on config: `sdkconfig.defaults.local` currently
+sets `CONFIG_LED_ORCHESTRA_OPERATOR_WIFI_MODE_DISABLED=y`, so the controller has
+Thread connectivity but no IPv4 LAN path to `192.168.1.74:8070`.
+
+### Next Step
+
+Pick a controller-reachable image serving path before re-running OTA:
+
+- enable Wi-Fi STA for the provider-on bench image and serve the `.ota` from the
+  same LAN, or
+- serve the image from a hub-local/Kubernetes endpoint reachable by the controller,
+  or
+- change the provider fork to stream from local flash/storage instead of HTTP.
+
+After that, rerun the controlled sequence: stage image, first announce to create
+the requestor entry, `lo-ota-enable 4 once`, second announce to offer, then verify
+BDX download/apply and rollback.
+
+## 2026-06-28: Provider-On Controller Crashes In `controller.init()`
+
+### Symptom
+
+After fixing the Wi-Fi-AP routing blocker above (rebuilt provider-on controller
+from a clean `build-ota-provider` dir, NVS erased), the controller no longer
+boots: it crash-loops on every reset before `app_main()` finishes.
+
+```text
+MatterController: init(88): Failed to initialize DeviceControllerFactory
+ESP_ERROR_CHECK failed: esp_err_t 0xffffffff (ESP_FAIL)
+file: "./main/app_main.cpp" line 148
+expression: controller.init(112233, 1, 5580)
+```
+
+This is the commissioner setup call in `app_main.cpp`, gated by
+`CONFIG_ESP_MATTER_COMMISSIONER_ENABLE`, which runs after `esp_matter::start()`
+in the provider-on (`CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER=y`) build.
+
+### Architecture At The Time
+
+Provider-on controller = commissioner + Matter server (data model, for the OTA
+Provider cluster) + offline OTA provider fork, all in one process, per
+[`../matter-prototype/s3-h2-hub-validation/phase-7-offline-ota.md`](../matter-prototype/s3-h2-hub-validation/phase-7-offline-ota.md).
+Boot order in `app_main.cpp`: `led_orchestra_ota_provider_init()` →
+`esp_matter::start()` (starts `chip::Server`, opens+closes a commissioning
+window) → `led_orchestra_ota_provider_bind_delegate()` → `controller.init()` →
+`controller.setup_commissioner()` → bind BDX on the controller's exchange
+manager.
+
+### What Worked
+
+The same boot order worked in an earlier session the same day (see the BDX
+dispatch evidence in `phase-7-offline-ota.md`'s "Debug Evidence (2026-06-28)"
+section) — `controller.init()` succeeded there, producing two live exchange
+managers (`0x4082cd88` server, `0x40870e38` controller), and OTA progressed all
+the way to BDX transfer before stalling on the (since-fixed) Wi-Fi routing
+issue. The difference was heap headroom, not boot order (confirmed later — see
+Resolution): the build sits right at the OOM edge, and the earlier run's stale
+build-dir sdkconfig happened to leave enough free heap for the commissioner's
+second CHIP stack to allocate; the clean rebuild did not. Root cause is the build
+being over the C6 RAM budget, not a structural/boot-order change — which is why
+the BLE / `InitChipStack` / boot-reorder hypotheses below all dead-ended.
+
+### What Failed
+
+`controller.init()` → `matter_controller_client::init()` (managed component:
+`controller-node/managed_components/espressif__esp_matter/components/esp_matter_controller/core/esp_matter_controller_client.cpp:85-87`)
+→ `chip::Controller::DeviceControllerFactory::GetInstance().Init(factory_init_params)`
+returns non-`CHIP_NO_ERROR`.
+
+### Hypotheses And Experiments
+
+| Hypothesis | Experiment | Result |
+| --- | --- | --- |
+| Double-init of `DeviceControllerFactory` (server already initialized it) | Read `CHIPDeviceControllerFactory.cpp:51-77` source | Ruled out: `Init()` returns `CHIP_NO_ERROR` early if `mSystemState != nullptr`, doesn't fail |
+| `matter_controller_client` class excluded at compile time by `#ifndef CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER` guard in the header | Diffed the managed-component header (`controller-node/managed_components/.../esp_matter_controller_client.h`) against the "system" esp-matter copy | Ruled out: the managed-component header declares the class unconditionally (no guard); the guarded copy lives only in `~/esp/esp-matter` and isn't what the build uses |
+| `chip::Server::Init()` itself calls `DeviceControllerFactory::Init()`, so factory state is already partially set when the controller calls it | Grepped `Server.cpp` in the managed component tree for `DeviceControllerFactory` | Ruled out: no references found. Factory `mSystemState` is still `nullptr` when the controller calls `Init()`, so it falls into the real `InitSystemState()` path, which is what's failing |
+| BLE transport conflict in `InitSystemState()`, or `ConnectivityMgr().GetBleLayer()` returns null after the app closes its commissioning window | Read ESP32 `BLEManagerImpl::_GetBleLayer()` | Ruled out: it is `return this;` — never null regardless of advertising/deinit state, so the BLE `VerifyOrReturnError` (`CHIPDeviceControllerFactory.cpp:166`) cannot fire |
+| Re-entering `PlatformMgr().InitChipStack()` (called by both `esp_matter::start()` and the factory) fails on the second call | Read the public `PlatformManager::InitChipStack()` wrapper | Ruled out: `if (mInitialized) return CHIP_NO_ERROR;` (`PlatformManager.h:372`) — the second call is a no-op. This is *why* server+controller co-location works at all |
+| Matter's own Wi-Fi stack got enabled by the clean rebuild and consumed the heap in `start()` | Checked generated config: `ENABLE_WIFI_AP`/`ENABLE_WIFI_STATION` both off → `CHIP_DEVICE_CONFIG_ENABLE_WIFI==0` | Ruled out: `start()` skips `InitWiFiStack()`; the app's own softAP (`controller_wifi_ingress`) starts *after* `controller.init()` |
+| Heap exhaustion — server + commissioner (two full CHIP stacks) + OpenThread BR + BLE is over budget on one C6 | Patched the managed component to print the real `CHIP_ERROR`, added a pre-`controller.init` heap log, reflashed `usbmodem11101`, captured serial | **Confirmed root cause** (see Decisive Evidence) |
+
+### Decisive Evidence
+
+Patched `esp_matter_controller_client.cpp:88` to print the real error and added a
+`pre-controller.init heap` log in `app_main.cpp`. Captured on the controller
+(`usbmodem11101`, fresh NVS):
+
+```text
+W lo_controller: pre-controller.init heap: free=10124 min_free=8568 largest=6400
+E MatterController: init(89): Failed to initialize DeviceControllerFactory: b   ← CHIP_ERROR_NO_MEMORY (CHIP_CORE_ERROR(0x0b))
+ESP_ERROR_CHECK failed ... line 156   ← controller.init()
+```
+
+Only ~10 KB free and a **6.4 KB largest block** before `controller.init()`; the
+controller's `InitSystemState` must allocate a whole second stack
+(`DeviceControllerSystemState` + transport/session/exchange/BDX/CASE + its own
+fabric table), whose first object alone exceeds 6.4 KB → `CHIP_ERROR_NO_MEMORY`.
+
+### Resolution
+
+Root cause: **heap exhaustion**, not a structural interop bug. The provider-on
+build runs two full CHIP stacks (server + commissioner) plus OpenThread and Wi-Fi
+on one C6 and was over the RAM budget.
+
+Fix (in `sdkconfig.ota-provider.defaults`): reclaim RAM by dropping subsystems
+this build does not need:
+
+- `CONFIG_OPENTHREAD_BORDER_ROUTER=n` — the selected split topology makes the
+  S3+H2 the BR (bench port `usbmodem101` runs `thread_border_router`); the
+  controller only needs to be a Thread FTD.
+- `CONFIG_BT_ENABLED=n` / `CONFIG_ENABLE_ESP32_BLE_CONTROLLER=n` — the provider-on
+  build never BLE-commissions (see the 2026-06-27 single-role-BLE entry); commission
+  with the commissioner-only build, then switch.
+
+That freed ~70 KB: `controller.init()` + `setup_commissioner()` now succeed
+(`free≈79284 / largest≈53248` before the call), and the server fabric-table check
+added at `app_main.cpp` confirms the commissioner fabric is shared with the
+provider (`server_fabric_count=1 present_in_server_table=yes`) — good for OTA.
+
+Doing so surfaced a **second, downstream OOM**: `controller_wifi_ingress_start()`
+then fails with `ESP_ERR_NO_MEM` (`esp_wifi_init`: "Expected to init 10 rx buffer,
+actual is 3") because the Matter stack consumes ~70 KB during init, starving the
+Wi-Fi driver's default buffer pool. Staged fix: shrink the softAP to a
+single-client footprint (`STATIC_RX_BUFFER_NUM=4`, dynamic RX/TX `32→8`, AMPDU
+off, `MGMT_SBUF_NUM=8`) plus a flash-only unused-cluster trim. Build is clean
+(45% flash free); **boot past Wi-Fi init is unverified — bench hardware was
+disconnected before this could be reflashed.**
+
+### Lessons
+
+- `ESP_RETURN_ON_FALSE`/`ESP_ERROR_CHECK` chains in esp-matter's controller glue
+  swallow the underlying `CHIP_ERROR`. Get the real `CHIP_ERROR_FORMAT` value
+  (and the heap, for any `Init` failure) before theorizing — `ESP_FAIL` alone
+  sent the first pass chasing BLE/double-init dead-ends that five minutes of
+  source reading (and one heap print) ruled out.
+- Server + commissioner co-located on one ESP32-C6 is genuinely RAM-bound. BR and
+  BLE are the two big reclaimable subsystems; even after both, Wi-Fi + the actual
+  OTA transfer (BDX + HTTP + CASE concurrently) leave little headroom. Treat this
+  config as over-budget and measure heap at each lever.
+
+### Follow-Up
+
+1. Reconnect the bench, reflash `build-ota-provider` to `usbmodem11101`, and
+   confirm `pre-controller.init heap` improved and the boot reaches "controller
+   node ready" (Wi-Fi inits).
+2. If Wi-Fi still OOMs, the next *RAM* levers (cluster trim is flash-only) are the
+   CHIP session/exchange pools and OpenThread buffer counts — tune with the heap
+   probe, not by guessing.
+3. Watch free heap during a real end-to-end OTA transfer before declaring Phase 7
+   done; the transfer adds BDX + HTTP-client + CASE-to-node allocations on top.
+4. Persist the diagnostic patches (real CHIP error at
+   `esp_matter_controller_client.cpp:88`) as a `components/` override so they
+   survive `idf.py reconfigure`, or revert them once heap headroom is comfortable.

@@ -133,8 +133,9 @@ Compatibility rules:
 Prototype implementation notes:
 
 - Cluster id is currently `0xFFF1FC00`, using a development vendor id.
-- The LED node renders `off`, `solid`, `rainbow`, `fibonacci`, and
-  `aurora-breathe` through the effect/color engine onto ESP-IDF `led_strip`.
+- The LED node renders `off`, `solid`, `rainbow`, `fibonacci`,
+  `aurora-breathe`, `comet`, `theater-chase`, `palette-cycle`, and `twinkle`
+  through the effect/color engine onto ESP-IDF `led_strip`.
 - `SetNodeConfig` is **durable**: accepted config is persisted in NVS (magic +
   version + CRC) and reloaded at boot before the renderer/attributes use it.
 - The controller node registers USB shell helpers: unicast `lo-set-scene`,
@@ -164,6 +165,9 @@ Matter/Thread command -> renderer state -> color engine (CRGB/CHSV, palettes,
   carries effect ids, names, per-effect param usage, and palette references
   (palettes are data). New effect *behavior* ships as compiled firmware via OTA;
   no runtime-uploaded effect code.
+- Palette refs are append-only data alongside effect ids. Current refs are
+  `0` aurora, `1` ember, `2` ocean, `3` coral, `4` jungle, `5` ice,
+  `6` neon-party, `7` gold-score, and `8` maintenance-white-blue.
 - The engine also exposes an output-policy hook: per-strip color
   correction/temperature, master brightness, and a future power-budget policy.
 - **FastLED as the physical driver is a separate, hardware-gated spike.** Do not

@@ -124,21 +124,22 @@ Acceptance criteria:
 
 ## Phase 6: Segment Config, Synchronized Effects, And Program Bundles
 
-Status: **firmware complete; hardware gate pending.**
+Status: **two-node hardware gate passed 2026-06-26; scale/soak remains.**
 All Phase 6 firmware is in place: durable NVS `NodeConfig` (versioned, CRC,
 load-and-log at boot), durable NVS scene persistence (last active scene survives
-power cycle — `scene persisted ...` / `scene loaded from NVS ...`), scheduled
+power cycle - `scene persisted ...` / `scene loaded from NVS ...`), scheduled
 `SetScene` with keep-last-valid promotion at the synchronized start time, the
 `lo-scheduled-scene-group` convenience command, `lo-sync-clock-group`, the
 FastLED-shaped effect/color engine + append-only effect metadata registry, and
 `lo-read-config` (unicast ReadRequest to query all cluster attributes from a
-node). The declarative bundle *format* and on-Thread transport remain open by
-design (see the effect-management decision below and `architecture.md`); the code
-boundaries (commands append-only, bundles-are-data, distribute-then-activate) are
-in place. **Hardware gate:** multi-node hardware proof of synchronized scheduled
-group activation (lo-sync-clock-group → lo-scheduled-scene-group → all nodes
-flip at the same time) and durable config round-trip (lo-set-node-config →
-power-cycle → lo-read-config confirms NVS values) will close this phase.
+node). Hardware proof on the selected split topology used the S3+H2 BR-only
+board, one C6 controller, and two C6 LED nodes: durable config survived LED-node
+reset, both nodes joined group `0x0001`, group `SetScene` sequence `6001`
+rendered on both nodes, and synchronized scheduled sequence `6002` activated on
+both nodes within about 10 ms. The declarative bundle *format* and on-Thread
+transport remain open by design (see the effect-management decision below and
+`architecture.md`); the code boundaries (commands append-only, bundles-are-data,
+distribute-then-activate) are in place.
 
 Goal: make the hub the source of truth for node config, effect timing, and the
 distribution of declarative program bundles.
@@ -177,20 +178,50 @@ Acceptance criteria:
 
 ## Phase 7: Offline OTA
 
-Status: **requestor present; provider scaffold landed (build-gated); offline
-image plumbing + field-security pending.** LED nodes are Matter OTA Requestors
-(`CONFIG_ENABLE_OTA_REQUESTOR=y`, requestor cluster auto-created, `ota_0`/`ota_1`/
-`otadata` partitions present; builds). The controller has an OTA Provider cluster
-+ `lo-ota-*` operator commands behind `CONFIG_LED_ORCHESTRA_ENABLE_OTA_PROVIDER`
-(off by default). **Remaining for functional offline OTA:** the stock provider
-sources candidates from DCL and fetches image bytes over HTTP, so a hub-local
-image endpoint (or a flash-backed provider extension) is needed to keep it
-offline; details in
+Status: **offline path implemented; provider-on controller boot root-caused +
+mostly fixed (2026-06-28). Wi-Fi-init heap fix and end-to-end apply proof remain
+(blocked on bench reconnect).** Implemented and built:
+
+- **LED node = OTA Requestor + brick-safe.** `CONFIG_ENABLE_OTA_REQUESTOR=y`, dual
+  3 MB OTA slots on the N8 layout, **app rollback enabled**
+  (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`) plus a Thread-attach **health gate**
+  that confirms a new image only after the mesh attaches, else rolls back. Device
+  software version is Kconfig-driven for repeatable OTA version bumps.
+- **Controller = offline OTA Provider.** Behind `CONFIG_LED_ORCHESTRA_ENABLE_OTA_PROVIDER`,
+  backed by `lo_ota_provider` — our **offline fork** of esp-matter's provider with
+  the DCL candidate fetch and forced-TLS download **removed**: `lo-ota-set-image`
+  registers a **local** candidate and the bytes stream over **plain HTTP** from a
+  hub-local control-LAN endpoint ([`lo-ota-image-server.py`](../matter-prototype/s3-h2-hub-validation/lo-ota-image-server.py));
+  laptop now, Kubernetes endpoint later, only the URL changes. The provider-on
+  controller builds and fits (about 2.86 MB / 5 MB factory) and the provider
+  cluster is confirmed live on endpoint `1`. QueryImage reaches the provider and
+  the LED node's `BDX:ReceiveInit` now dispatches to the OTA BDX sender.
+
+**Architecture note found at the provider-on gate:** the provider-on controller
+**cannot BLE-commission new nodes** — enabling the Matter server (required for the
+provider cluster) claims BLE in the commissionable *peripheral* role, which
+conflicts with the commissioner's *central* role (esp-matter BLE is single-role).
+This does not block OTA (which rides Thread/CASE, not BLE): the deployment flow is
+**commission once with the commissioner build, then OTA over the air**.
+
+**Heap (root-caused 2026-06-28):** the provider-on build runs two full CHIP stacks
+(server + commissioner) plus OpenThread + Wi-Fi on one C6 and was over the RAM
+budget — `controller.init()` crash-looped with `CHIP_ERROR_NO_MEMORY` (~10 KB free
+before the call). Fixed by dropping unneeded subsystems in
+`sdkconfig.ota-provider.defaults`: `OPENTHREAD_BORDER_ROUTER=n` (S3+H2 is the BR) +
+`BT_ENABLED=n` (this build never BLE-commissions). That frees ~70 KB and
+`controller.init()` now succeeds, with the commissioner fabric shared into the
+server fabric table (good for OTA). A downstream Wi-Fi-init OOM remains (softAP
+buffer shrink staged, **unverified pending bench reconnect**); see the Phase 7
+runbook and the 2026-06-28 debugging-journal entry.
+
+**Remaining for functional offline OTA:** confirm the slimmed image boots past
+Wi-Fi init, then a commissioned LED node must actually download + apply an image
+over Matter/Thread, and the **bad-image rollback** must be confirmed.
+**Field-ready** OTA additionally needs secure boot, flash encryption,
+signed/encrypted images, and key handling — a separate security layer from fabric
+credentials. Full detail + bench runbook:
 [`../matter-prototype/s3-h2-hub-validation/phase-7-offline-ota.md`](../matter-prototype/s3-h2-hub-validation/phase-7-offline-ota.md).
-OTA is **functional** only after a real LED node downloads and applies an image
-over Matter/Thread. **Field-ready** OTA additionally needs secure boot, flash
-encryption, signed/encrypted images, key handling, and rollback/recovery tests —
-a separate security layer from fabric credentials.
 
 Goal: update commissioned LED nodes over the offline Matter/Thread fabric (no
 node-side USB cable, no internet).

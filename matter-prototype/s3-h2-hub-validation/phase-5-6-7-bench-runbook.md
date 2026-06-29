@@ -41,6 +41,11 @@ Reset the C6 controller before each BLE pairing; send the long pairing line with
 matter esp controller pairing ble-thread <node-id> <dataset_tlvs> 20202021 3840
 ```
 
+Bench lesson from 2026-06-26: if the S3 BR is still advertising the default
+discriminator `3840`, a pairing command can hit the BR instead of the LED node.
+Before pairing, make sure only the intended LED node has an open commissioning
+window, or move production devices to unique discriminators/passcodes.
+
 Commission node ids `1`, `2`, `3` one at a time. The same loop adds nodes `4..20`
 later — capture min-free-heap after each (step 10).
 
@@ -87,6 +92,12 @@ matter esp controller group-settings add-group   0x0001 orchestra
 > every node holds the group key, group commands are not accepted and each node
 > keeps its last valid scene. Journal the exact working payloads once proven.
 
+Bench lesson from 2026-06-26: after a LED node reset/reboot, reset the C6
+controller before group provisioning or group-control proof. Stale operational
+CASE sessions can otherwise produce timeouts even though the node has rejoined
+Thread and is advertising again. A controller reset cleared the stale sessions
+and the same group-key/AddGroup/ACL sequence then succeeded cleanly.
+
 ## 6. Verify ONE real group command
 
 ```text
@@ -113,6 +124,14 @@ All nodes keep their current scene for ~3 s, then **flip to red together**. Each
 node logs `scheduled scene accepted ...` then `scheduled scene activated ...`.
 They do **not** blank during the wait (keep-last-valid).
 
+2026-06-26 two-node Phase 6 proof: group `SetScene` sequence `6001` reached both
+LED nodes at the same log timestamp, then
+`lo-sync-clock-group 0x0001` + `lo-scheduled-scene-group 0x0001 3000 1 ff0000 0 60 6002`
+was accepted by both nodes and activated within about 10 ms
+(`492635` vs `492645` log ticks). This closes the two-node durable-config +
+synchronized-scheduled-group hardware gate; repeat at larger node counts during
+scale/soak.
+
 ## 9. Keep brightness configurable and low
 
 `brightness=60` (~24% of full scale) is the proven bench power workaround. This is
@@ -128,9 +147,10 @@ downward drift.
 ## 11. OTA validation (separate, do not claim early)
 
 Mark OTA **functional only after a real LED node downloads and applies an image
-over Matter/Thread.** Provider build + the remaining offline serve plumbing are in
+over Matter/Thread.** QueryImage and BDX dispatch are proven; the remaining
+image-source reachability, apply proof, and rollback proof are in
 [`phase-7-offline-ota.md`](phase-7-offline-ota.md). Do not flip OTA to "done" on
-the strength of the requestor existing or the provider scaffold building.
+the strength of the requestor existing or the provider answering QueryImage.
 
 ## Evidence (fill at the bench)
 

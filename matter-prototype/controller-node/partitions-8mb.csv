@@ -1,0 +1,21 @@
+# LED Orchestra controller node — 8 MB (ESP32-C6-WROOM-1-N8) partition layout.
+#
+# The deployment standardizes on N8 (8 MB) for controllers as well as LED nodes
+# (see docs/led-node-flash-sizing-decision.md). The controller hosts a single
+# `factory` app (it is the commissioner/provider; it is not itself OTA'd, so no
+# ota_0/ota_1 slots). The provider-on build (commissioner + Matter data-model
+# server + OTA provider) is larger than the proven commissioner, so factory grows
+# from 3.5 MB (4 MB layout) to 5 MB here, with ~2.6 MB left unpartitioned as
+# reserve. Front matter (esp_secure_cert / nvs / nvs_keys / phy_init) is
+# byte-identical to partitions.csv so provisioned credentials stay valid; paa_cert
+# (regenerated SPIFFS, not a secret) simply moves up.
+#
+# NOTE: this layout only fits an 8 MB (N8) part. The 4 MB default (partitions.csv
+# + CONFIG_ESPTOOLPY_FLASHSIZE_4MB) remains the proven commissioner build.
+# Name,            Type, SubType, Offset,   Size,     Flags
+esp_secure_cert,   0x3F, ,        0xd000,   0x2000,   encrypted
+nvs,               data, nvs,     0x10000,  0xC000,
+nvs_keys,          data, nvs_keys,,         0x1000,   encrypted
+phy_init,          data, phy,     ,         0x1000,
+factory,           app,  factory, 0x20000,  0x500000,
+paa_cert,          data, spiffs,  ,         0x20000,

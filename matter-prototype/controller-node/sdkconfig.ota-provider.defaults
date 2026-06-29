@@ -1,0 +1,138 @@
+# Provider-on controller build overlay — Phase 7 offline OTA.
+#
+# Layer this OVER sdkconfig.defaults; it does not change the proven default
+# commissioner build. The project CMakeLists pins SDKCONFIG_DEFAULTS and shadows
+# any -D override, so layer this through the EXTRA_SDKCONFIG_DEFAULTS env var:
+#
+#   EXTRA_SDKCONFIG_DEFAULTS=sdkconfig.ota-provider.defaults \
+#     idf.py -B build-ota-provider -D SDKCONFIG=build-ota-provider/sdkconfig \
+#       set-target esp32c6 build
+#
+# Use a separate -B build dir AND -D SDKCONFIG=<builddir>/sdkconfig so the
+# generated config stays inside the build dir — otherwise idf.py writes sdkconfig
+# to the project root and clobbers the proven default commissioner config.
+#
+# This pairs the commissioner with a Matter data-model server (so requestors can
+# invoke the OTA Provider cluster) plus our offline provider fork
+# (components/lo_ota_provider). Per the Phase 7 runbook this commissioner+server
+# co-located build is itself a hardware gate — capture heap + flash headroom on
+# the first provider-on flash and journal it. See
+# matter-prototype/s3-h2-hub-validation/phase-7-offline-ota.md.
+
+# Build + register the offline OTA Provider cluster and lo-ota-* commands.
+CONFIG_LED_ORCHESTRA_ENABLE_OTA_PROVIDER=y
+
+# The controller must host a data model for the requestors to talk to.
+CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER=y
+
+# Enabling the server compiles the full Matter cluster set (cluster-select defaults
+# every SUPPORT_*_CLUSTER to y). On the pinned esp-matter v1.4.2 snapshot the
+# ClosureControl/ClosureDimension cluster servers do not compile (missing
+# operator== on GenericOverallCurrentState in Nullable<>). The controller / OTA
+# provider never uses Closure clusters, so exclude them via cluster-select. (This
+# is also the lever to trim controller flash further by dropping other unused
+# clusters once the provider-on build is validated.)
+CONFIG_SUPPORT_CLOSURE_CONTROL_CLUSTER=n
+CONFIG_SUPPORT_CLOSURE_DIMENSION_CLUSTER=n
+
+# N8 (8 MB) hardware: give the larger commissioner+server+provider image room.
+# (The image also fits the proven 4 MB layout at ~21% free, but the controller is
+# N8 and we full-flash it for provider-on anyway, so use the roomier 5 MB factory.)
+# NOTE: the effective custom-CSV knob is CONFIG_PARTITION_TABLE_CUSTOM_FILENAME,
+# not CONFIG_PARTITION_TABLE_FILENAME (which is derived/ignored here).
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-8mb.csv"
+
+# Pin operator Wi-Fi AP mode so a stale build-ota-provider/sdkconfig cannot
+# accidentally leave it disabled. The controller must host its AP so the image
+# server laptop can connect and serve the .ota file at its 192.168.4.x address.
+# AP SSID/password come from sdkconfig.defaults.local (gitignored).
+CONFIG_LED_ORCHESTRA_OPERATOR_WIFI_MODE_AP=y
+
+# Heap: the provider-on build runs BOTH a Matter server (for the provider cluster)
+# and a Matter commissioner (DeviceControllerFactory builds a *second* full stack:
+# transport/session/exchange/BDX/CASE + its own fabric table). On 2026-06-28 that
+# left only ~10 KB free / 6.4 KB largest block before controller.init(), which then
+# failed with CHIP_ERROR_NO_MEMORY (0x0b). The base sdkconfig.defaults enables
+# OpenThread Border-Router mode (SRP server + BR tables) on this C6, which is
+# redundant heap weight under the selected split topology where the S3+H2 board is
+# the BR. Drop BR mode here to reclaim that RAM for the commissioner stack. (Verify
+# the S3+H2 is the live BR for this bench before relying on this build over Thread.)
+CONFIG_OPENTHREAD_BORDER_ROUTER=n
+
+# Heap: drop the BLE stack entirely on the provider-on build. NimBLE costs tens of
+# KB of RAM, and this build never BLE-commissions — the documented flow is to
+# commission each node with the commissioner-only build (BLE central works there),
+# then switch to provider-on and update over Thread/CASE. With BT off, esp-matter's
+# commissioner runs Thread-only (no CHIPoBLE transport, no ESP32 BLE controller).
+CONFIG_BT_ENABLED=n
+CONFIG_ENABLE_ESP32_BLE_CONTROLLER=n
+
+# Heap: shrink the Wi-Fi softAP to a single-client, low-throughput footprint. The
+# AP only carries the operator laptop's HTTP serve of one .ota file; it does not
+# need the default 10 static + 32 dynamic RX / 32 dynamic TX buffer pool. With the
+# Matter server+commissioner stack already resident, the default pool fails at
+# esp_wifi_init() ("Expected to init 10 rx buffer, actual is 3" -> ESP_ERR_NO_MEM,
+# app_main.cpp controller_wifi_ingress_start). Trim it. AMPDU off drops the block-
+# ack reorder buffers (throughput cost is irrelevant for a one-file pull).
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
+CONFIG_ESP_WIFI_MGMT_SBUF_NUM=8
+
+# Flash (not RAM): the controller hosts only the OTA-provider endpoint + the root
+# system clusters, so the full appliance/media/energy/sensor/camera cluster set is
+# dead code here. Disabling it reclaims flash; it does not meaningfully change heap
+# (unused clusters aren't instantiated on an endpoint). Keep ALL system/infra
+# clusters + OTA provider/requestor + Identify/Groups/Binding/Descriptor.
+CONFIG_SUPPORT_ACCOUNT_LOGIN_CLUSTER=n
+CONFIG_SUPPORT_ACTIONS_CLUSTER=n
+CONFIG_SUPPORT_ACTIVATED_CARBON_FILTER_MONITORING_CLUSTER=n
+CONFIG_SUPPORT_AIR_QUALITY_CLUSTER=n
+CONFIG_SUPPORT_APPLICATION_BASIC_CLUSTER=n
+CONFIG_SUPPORT_APPLICATION_LAUNCHER_CLUSTER=n
+CONFIG_SUPPORT_AUDIO_OUTPUT_CLUSTER=n
+CONFIG_SUPPORT_BOOLEAN_STATE_CONFIGURATION_CLUSTER=n
+CONFIG_SUPPORT_CAMERA_AV_SETTINGS_USER_LEVEL_MANAGEMENT_CLUSTER=n
+CONFIG_SUPPORT_CAMERA_AV_STREAM_MANAGEMENT_CLUSTER=n
+CONFIG_SUPPORT_CARBON_DIOXIDE_CONCENTRATION_MEASUREMENT_CLUSTER=n
+CONFIG_SUPPORT_CARBON_MONOXIDE_CONCENTRATION_MEASUREMENT_CLUSTER=n
+CONFIG_SUPPORT_CHANNEL_CLUSTER=n
+CONFIG_SUPPORT_CHIME_CLUSTER=n
+CONFIG_SUPPORT_COMMODITY_PRICE_CLUSTER=n
+CONFIG_SUPPORT_CONTENT_APP_OBSERVER_CLUSTER=n
+CONFIG_SUPPORT_CONTENT_CONTROL_CLUSTER=n
+CONFIG_SUPPORT_CONTENT_LAUNCHER_CLUSTER=n
+CONFIG_SUPPORT_DEVICE_ENERGY_MANAGEMENT_CLUSTER=n
+CONFIG_SUPPORT_DEVICE_ENERGY_MANAGEMENT_MODE_CLUSTER=n
+CONFIG_SUPPORT_DISHWASHER_ALARM_CLUSTER=n
+CONFIG_SUPPORT_DISHWASHER_MODE_CLUSTER=n
+CONFIG_SUPPORT_DOOR_LOCK_CLUSTER=n
+CONFIG_SUPPORT_ELECTRICAL_ENERGY_MEASUREMENT_CLUSTER=n
+CONFIG_SUPPORT_ELECTRICAL_GRID_CONDITIONS_CLUSTER=n
+CONFIG_SUPPORT_ELECTRICAL_POWER_MEASUREMENT_CLUSTER=n
+CONFIG_SUPPORT_ENERGY_EVSE_CLUSTER=n
+CONFIG_SUPPORT_ENERGY_EVSE_MODE_CLUSTER=n
+CONFIG_SUPPORT_ENERGY_PREFERENCE_CLUSTER=n
+CONFIG_SUPPORT_FAN_CONTROL_CLUSTER=n
+CONFIG_SUPPORT_FAULT_INJECTION_CLUSTER=n
+CONFIG_SUPPORT_FORMALDEHYDE_CONCENTRATION_MEASUREMENT_CLUSTER=n
+CONFIG_SUPPORT_HEPA_FILTER_MONITORING_CLUSTER=n
+CONFIG_SUPPORT_KEYPAD_INPUT_CLUSTER=n
+CONFIG_SUPPORT_LAUNDRY_DRYER_CONTROLS_CLUSTER=n
+CONFIG_SUPPORT_LAUNDRY_WASHER_CONTROLS_CLUSTER=n
+CONFIG_SUPPORT_LAUNDRY_WASHER_MODE_CLUSTER=n
+CONFIG_SUPPORT_LOW_POWER_CLUSTER=n
+CONFIG_SUPPORT_MEDIA_INPUT_CLUSTER=n
+CONFIG_SUPPORT_MEDIA_PLAYBACK_CLUSTER=n
+CONFIG_SUPPORT_MESSAGES_CLUSTER=n
+CONFIG_SUPPORT_METER_IDENTIFICATION_CLUSTER=n
+CONFIG_SUPPORT_MICROWAVE_OVEN_CONTROL_CLUSTER=n
+CONFIG_SUPPORT_MICROWAVE_OVEN_MODE_CLUSTER=n
+CONFIG_SUPPORT_NITROGEN_DIOXIDE_CONCENTRATION_MEASUREMENT_CLUSTER=n
+CONFIG_SUPPORT_OCCUPANCY_SENSING_CLUSTER=n
+CONFIG_SUPPORT_OPERATIONAL_STATE_OVEN_CLUSTER=n
+CONFIG_SUPPORT_OPERATIONAL_STATE_RVC_CLUSTER=n
+CONFIG_SUPPORT_OVEN_MODE_CLUSTER=n

@@ -158,7 +158,7 @@ one-board hub gate):
 | Runbook | Purpose |
 | --- | --- |
 | [`phase-5-6-7-bench-runbook.md`](phase-5-6-7-bench-runbook.md) | Bench walkthrough: commission 3→20 nodes, verify real **group control**, durable NVS config, and synchronized **scheduled group** scenes. |
-| [`phase-7-offline-ota.md`](phase-7-offline-ota.md) | Offline Matter OTA: requestor (present) + provider scaffold (build-gated), the remaining offline image plumbing, and the field-security layer. |
+| [`phase-7-offline-ota.md`](phase-7-offline-ota.md) | Offline Matter OTA: requestor + provider-on build, endpoint/ACL/BDX debug evidence, current image-source reachability blocker, and the field-security layer. |
 
 ## Working Split (selected architecture)
 
