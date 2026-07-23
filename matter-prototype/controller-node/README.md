@@ -44,6 +44,30 @@ idf.py -p <CONTROLLER_PORT> monitor
 For the full command reference, monitor setup, and group enrollment steps, use
 [`../../docs/console.md`](../../docs/console.md).
 
+## Controller Flash Size
+
+The controller can be run on either **4 MB** or **8 MB** ESP32-C6 hardware, but
+the recommended choice depends on which controller build you want:
+
+- **Commissioner-only controller** (the default build in `sdkconfig.defaults`):
+  proven on the 4 MB partition layout and also flashable to an 8 MB board.
+- **Provider-on controller** (offline OTA Provider enabled with
+  `sdkconfig.ota-provider.defaults`): use an **8 MB** controller board and the
+  `partitions-8mb.csv` layout.
+
+Practical recommendation:
+
+- If you are buying or assigning a controller board now, make the controller an
+  **ESP32-C6-WROOM-1-N8 (8 MB)** class board.
+- Any `esp32c6` board with **8 MB flash** and working USB serial/JTAG is a good
+  controller candidate; the controller firmware does not depend on a special LED
+  output pin map the way the LED nodes do.
+
+Compatibility rule:
+
+- A **4 MB controller image can run on an 8 MB controller board**.
+- The **8 MB provider-on controller image must not be flashed to a 4 MB board**.
+
 ## Current Status
 
 - Builds for `esp32c6` as the separate controller/commissioner.
@@ -51,6 +75,8 @@ For the full command reference, monitor setup, and group enrollment steps, use
 - Starts a standalone private operator AP when local credentials are configured.
 - Sends unicast `SetScene`, `SetNodeConfig`, and `SyncClock`.
 - Sends Matter group scene and clock commands through group node ids.
+- Can address the full current LED effect registry, including ocean-theme,
+  party, and occasion scenes added on the LED nodes.
 - Includes a build-gated OTA Provider scaffold; functional offline OTA still
   needs local image plumbing and hardware validation.
 
@@ -79,11 +105,16 @@ For the full command reference, monitor setup, and group enrollment steps, use
   - `lo-set-scene <node-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]`
   - `lo-set-node-config <node-id> <endpoint-id> <orchestra-node-id> <segment-start> <segment-len> <total-leds> <led-gpio>`
   - `lo-sync-clock <node-id> <endpoint-id> [controller-time-ms]`
+  - `lo-set-calibration <node-id> <endpoint-id> <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]`
+    — per-node field tuning as **data, not firmware** (synchronized timing offset,
+    brightness cap, palette override, LED color correction); persisted on the node.
+    Use `-` to keep any existing field unchanged.
 - **Real group control** (encodes group ids with `chip::NodeIdFromGroupId`):
   - `lo-add-group <node-id> <endpoint-id> [group-id] [group-name]` (Groups cluster AddGroup)
   - `lo-set-scene-group <group-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]`
   - `lo-sync-clock-group <group-id> [controller-time-ms]`
   - `lo-scheduled-scene-group <group-id> <delay-ms> <effect-id> <rrggbb> <speed> <brightness> [sequence]`
+  - `lo-set-calibration-group <group-id> <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]`
   - `lo-show-group-help` — prints the one-time group key + enrollment sequence
   - `../s3-h2-hub-validation/lo-provision-group-member` — host-side helper that
     prints the four per-node provisioning commands with a least-privilege

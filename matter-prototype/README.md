@@ -86,7 +86,9 @@ The completed Rust Wi-Fi/UDP Phase 1/2 implementation is archived on the
 - LED node project skeleton with ESP-Matter component-manager dependency.
 - ESP32-C6 Thread-oriented `sdkconfig.defaults`.
 - WS2812 renderer on GPIO2 for `off`, `solid`, `rainbow`, `fibonacci`,
-  `aurora-breathe`, `comet`, `theater-chase`, `palette-cycle`, and `twinkle`.
+  `aurora-breathe`, `comet`, `theater-chase`, `palette-cycle`, `twinkle`,
+  `ocean-drift`, `color-wave`, `pulse-reveal`, `celebration`, `identify`,
+  `tidal-surge`, `party-confetti`, and `champagne-toast`.
 - Vendor custom cluster `0xFFF1FC00` with `SetScene`, `SetNodeConfig`, and
   `SyncClock` command callbacks.
 - Controller-node project with ESP-Matter controller/commissioner
@@ -144,10 +146,22 @@ cd matter-prototype/led-node
 idf.py set-target esp32c6
 idf.py build
 
+# Mixed 4 MB / 8 MB LED-node fleet: also build the N4 image.
+idf.py -B build-4mb \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.4mb.defaults" \
+  -D SDKCONFIG=build-4mb/sdkconfig set-target esp32c6 build
+
 cd ../controller-node
 idf.py set-target esp32c6
 idf.py build
 ```
+
+Firmware release rule for mixed LED fleets:
+
+- Any change that alters the **LED-node firmware** should produce **both**
+  LED-node artifacts for that release: the default **N8** image and the
+  **N4** image built with `sdkconfig.4mb.defaults`.
+- A **controller-only** change does not require rebuilding LED-node images.
 
 After flashing, the controller shell should expose the usual Espressif
 controller commands plus the LED Orchestra helpers. Example custom-cluster

@@ -30,7 +30,39 @@ int64_t g_clock_offset_ms = 0;
 // Engine output policy (color correction / temperature / master brightness /
 // power-budget hook). Defaults are identity-ish so the proven bench visuals are
 // unchanged; this is the seam where per-node correction and power policy attach.
+// It is DERIVED from g_calibration (see apply_calibration_locked); SetCalibration
+// is the only thing that changes it.
 lo::OutputPolicy g_output_policy;
+
+// Per-node field calibration (SetCalibration). Identity defaults: no time shift,
+// no brightness cap, effect-default palette, identity color correction — so an
+// un-calibrated node renders exactly as before.
+LedOrchestraCalibration g_calibration = {
+    .time_offset_ms = 0,
+    .brightness_cap = 255,
+    .palette_override = kCalibNoPaletteOverride,
+    .color_correction = 0x00FFFFFF,
+    .color_temperature = 0x00FFFFFF,
+};
+
+lo::CRGB unpack_rgb(uint32_t packed)
+{
+    return lo::CRGB(static_cast<uint8_t>((packed >> 16) & 0xFF), static_cast<uint8_t>((packed >> 8) & 0xFF),
+                    static_cast<uint8_t>(packed & 0xFF));
+}
+
+// Push a calibration into g_calibration and re-derive the engine output policy
+// from it. Caller holds g_lock. The render math part (time offset, palette
+// override) stays in g_calibration; the output part (brightness ceiling, color
+// correction / temperature) flows into g_output_policy so the existing
+// apply_output_policy() path applies it unchanged.
+void apply_calibration_locked(const LedOrchestraCalibration &calib)
+{
+    g_calibration = calib;
+    g_output_policy.master_brightness = calib.brightness_cap;
+    g_output_policy.color_correction = unpack_rgb(calib.color_correction);
+    g_output_policy.color_temperature = unpack_rgb(calib.color_temperature);
+}
 
 LedOrchestraScene g_scene = {
     .effect = led_orchestra::matter::kEffectRainbow,
@@ -88,17 +120,27 @@ bool policies_equal(const lo::OutputPolicy &a, const lo::OutputPolicy &b)
            a.milliamps_per_led_full_white == b.milliamps_per_led_full_white;
 }
 
+// Only the render-math part of calibration; the output part (brightness cap,
+// color correction/temperature) is compared via policies_equal, so a change to
+// either re-renders a static (non-animated) scene.
+bool calibrations_equal(const LedOrchestraCalibration &a, const LedOrchestraCalibration &b)
+{
+    return a.time_offset_ms == b.time_offset_ms && a.palette_override == b.palette_override;
+}
+
 void render_task(void *)
 {
     LedOrchestraScene last_scene = {};
     LedOrchestraNodeConfig last_node = {};
     lo::OutputPolicy last_policy;
+    LedOrchestraCalibration last_calib = {};
     bool have_rendered_frame = false;
 
     while (true) {
         LedOrchestraScene scene;
         LedOrchestraNodeConfig node;
         lo::OutputPolicy policy;
+        LedOrchestraCalibration calib;
         int64_t offset;
         bool has_pending;
         LedOrchestraScene pending;
@@ -107,11 +149,14 @@ void render_task(void *)
         scene = g_scene;
         node = g_node;
         policy = g_output_policy;
+        calib = g_calibration;
         offset = g_clock_offset_ms;
         has_pending = g_has_pending;
         pending = g_pending;
         portEXIT_CRITICAL(&g_lock);
 
+        // Synchronized controller time. Scheduled-scene activation uses THIS clock
+        // (the shared timeline), never the per-node calibration offset.
         uint64_t now_ms = static_cast<uint64_t>(static_cast<int64_t>(monotonic_ms()) + offset);
 
         // Promote a scheduled scene once its synchronized start time arrives.
@@ -135,18 +180,29 @@ void render_task(void *)
         const LoEffectMeta *meta = led_orchestra_effect_meta(scene.effect);
         bool animated = meta != nullptr && meta->scrolls;
         bool render_needed = animated || !have_rendered_frame || !scenes_equal(scene, last_scene) ||
-                             !configs_equal(node, last_node) || !policies_equal(policy, last_policy);
+                             !configs_equal(node, last_node) || !policies_equal(policy, last_policy) ||
+                             !calibrations_equal(calib, last_calib);
 
         if (!render_needed) {
             vTaskDelay(has_pending ? kFrameDelay : kStaticPollDelay);
             continue;
         }
 
+        // Effect math runs on the calibrated clock: a signed per-node offset shifts
+        // where this segment sits in a synchronized animation, so a wave/comet can
+        // be aligned hole-to-hole across physical gaps after install.
+        uint64_t effect_ms = static_cast<uint64_t>(static_cast<int64_t>(now_ms) + calib.time_offset_ms);
+
+        // Resolve the palette: a per-node override wins, else the effect's default.
+        uint8_t palette_ref = (calib.palette_override != kCalibNoPaletteOverride)
+                                  ? calib.palette_override
+                                  : (meta != nullptr ? meta->palette_ref : kNoPalette);
+
         uint16_t segment_len = std::min<uint16_t>(node.segment_len, CONFIG_LED_ORCHESTRA_LED_COUNT);
 
         for (uint16_t local = 0; local < segment_len; local++) {
             uint16_t global = node.segment_start + local;
-            lo::CRGB color = led_orchestra_render_effect(scene, node, global, now_ms);
+            lo::CRGB color = led_orchestra_render_effect(scene, node, global, effect_ms, palette_ref);
             color = lo::apply_output_policy(color, policy);
             // Bench strip is a 12V WS2815 wired in RGB wire order, but the
             // led_strip driver only emits GRB. Swap R/G so colors are correct
@@ -167,6 +223,7 @@ void render_task(void *)
         last_scene = scene;
         last_node = node;
         last_policy = policy;
+        last_calib = calib;
         have_rendered_frame = true;
 
         vTaskDelay(animated || has_pending ? kFrameDelay : kStaticPollDelay);
@@ -207,6 +264,22 @@ esp_err_t led_orchestra_renderer_start()
         portEXIT_CRITICAL(&g_lock);
         ESP_LOGI(TAG, "scene loaded from %s: effect=%u seq=%" PRIu32,
                  from_nvs ? "NVS" : "defaults", loaded.effect, loaded.sequence);
+    }
+
+    // Load durable field calibration so per-node timing/brightness/palette tuning
+    // survives a power-cycle without the controller re-sending SetCalibration.
+    {
+        LedOrchestraCalibration loaded;
+        bool from_nvs = false;
+        led_orchestra_calibration_load(loaded, from_nvs);
+        portENTER_CRITICAL(&g_lock);
+        apply_calibration_locked(loaded);
+        portEXIT_CRITICAL(&g_lock);
+        ESP_LOGI(TAG,
+                 "calibration loaded from %s: time_offset_ms=%" PRId32 " brightness_cap=%u palette_override=%u "
+                 "color_correction=0x%06" PRIX32 " color_temperature=0x%06" PRIX32,
+                 from_nvs ? "NVS" : "defaults", loaded.time_offset_ms, loaded.brightness_cap, loaded.palette_override,
+                 loaded.color_correction, loaded.color_temperature);
     }
 
     led_strip_config_t strip_config = {
@@ -300,6 +373,28 @@ esp_err_t led_orchestra_set_node_config(const LedOrchestraNodeConfig &config)
     return ESP_OK;
 }
 
+esp_err_t led_orchestra_set_calibration(const LedOrchestraCalibration &calibration)
+{
+    portENTER_CRITICAL(&g_lock);
+    apply_calibration_locked(calibration);
+    portEXIT_CRITICAL(&g_lock);
+
+    ESP_LOGI(TAG,
+             "calibration applied: time_offset_ms=%" PRId32 " brightness_cap=%u palette_override=%u "
+             "color_correction=0x%06" PRIX32 " color_temperature=0x%06" PRIX32,
+             calibration.time_offset_ms, calibration.brightness_cap, calibration.palette_override,
+             calibration.color_correction, calibration.color_temperature);
+
+    // Persist so field tuning survives a power-cycle without re-provisioning. A
+    // persistence failure is non-fatal: the live render state is already updated
+    // (keep-last-valid) and the controller can re-send on the next boot.
+    esp_err_t persist = led_orchestra_calibration_save(calibration);
+    if (persist != ESP_OK) {
+        ESP_LOGW(TAG, "calibration applied but not persisted (%s)", esp_err_to_name(persist));
+    }
+    return ESP_OK;
+}
+
 void led_orchestra_sync_clock(uint64_t controller_time_ms)
 {
     portENTER_CRITICAL(&g_lock);
@@ -322,4 +417,12 @@ LedOrchestraNodeConfig led_orchestra_get_node_config()
     LedOrchestraNodeConfig config = g_node;
     portEXIT_CRITICAL(&g_lock);
     return config;
+}
+
+LedOrchestraCalibration led_orchestra_get_calibration()
+{
+    portENTER_CRITICAL(&g_lock);
+    LedOrchestraCalibration calib = g_calibration;
+    portEXIT_CRITICAL(&g_lock);
+    return calib;
 }

@@ -106,6 +106,24 @@ or a cluster command/attribute/effect id, **update the docs in the same change**
 Phase *numbering* lives only in [docs/roadmap.md](docs/roadmap.md) and the README;
 other docs refer to phases by name (e.g. "the OTA phase") to avoid drift.
 
+## Firmware Build Discipline
+
+- Treat **LED-node firmware** as a **paired mixed-fleet deliverable**. If a
+  change affects LED-node behavior, features, rendering, effects, palettes,
+  cluster handling, persisted config, OTA-visible software, or anything else
+  that changes the LED-node binary, update **both** LED-node builds before
+  calling the work done:
+  - the default **N8 / 8 MB** build
+  - the **N4 / 4 MB** build using
+    `sdkconfig.4mb.defaults`
+- Keep the N4 and N8 LED releases on the same feature set unless the user
+  explicitly approves a temporary divergence.
+- A **controller-only** change does **not** require rebuilding LED-node
+  firmware.
+- A **controller OTA-provider** image is an **8 MB controller** target; the
+  commissioner-only controller build may still be used on 4 MB or 8 MB
+  controller boards.
+
 ## Repo Hygiene
 
 - `managed_components/`, `build/`, `sdkconfig*`, and `dependencies.lock` are

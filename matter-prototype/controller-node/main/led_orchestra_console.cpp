@@ -64,6 +64,26 @@ bool parse_u8(const char *value, uint8_t &out)
     return true;
 }
 
+// Parse a signed decimal/hex int32 into its two's-complement uint32 bits. The
+// SetCalibration time offset is signed but rides a U32 wire tag (the proven
+// token), so the controller transmits the raw bits and the node reinterprets.
+bool parse_i32_bits(const char *value, uint32_t &out)
+{
+    char *end = nullptr;
+    errno = 0;
+    long long parsed = strtoll(value, &end, 0);
+    if (errno != 0 || end == value || *end != '\0' || parsed < INT32_MIN || parsed > INT32_MAX) {
+        return false;
+    }
+    out = static_cast<uint32_t>(static_cast<int32_t>(parsed));
+    return true;
+}
+
+bool arg_is_keep(const char *value)
+{
+    return value != nullptr && strcmp(value, "-") == 0;
+}
+
 bool parse_rgb(const char *hex, uint8_t &red, uint8_t &green, uint8_t &blue)
 {
     if (strlen(hex) != 6) {
@@ -118,6 +138,91 @@ bool build_set_scene_json(char *json, size_t json_len, uint8_t effect, uint8_t r
                        ",\"7:U64\":%" PRIu64 "}",
                        effect, red, green, blue, speed, brightness, sequence, scheduled_start_ms);
     return len > 0 && len < static_cast<int>(json_len);
+}
+
+// Parse a 6-hex-digit RRGGBB string into a packed 0x00RRGGBB value (the wire
+// form of the calibration color-correction / temperature fields).
+bool parse_rgb_packed(const char *hex, uint32_t &packed)
+{
+    uint8_t r = 0, g = 0, b = 0;
+    if (!parse_rgb(hex, r, g, b)) {
+        return false;
+    }
+    packed = (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | b;
+    return true;
+}
+
+bool append_json_field(char *json, size_t json_len, size_t &used, bool &first, const char *field)
+{
+    size_t field_len = strlen(field);
+    size_t needed = field_len + (first ? 0 : 1);
+    if (used + needed + 1 > json_len) {
+        return false;
+    }
+    if (!first) {
+        json[used++] = ',';
+    }
+    memcpy(json + used, field, field_len);
+    used += field_len;
+    json[used] = '\0';
+    first = false;
+    return true;
+}
+
+// Build the SetCalibration payload shared by the unicast and groupcast handlers.
+// The append-only tag/type layout is the contract in cluster/led-orchestra.md.
+bool build_set_calibration_json(char *json, size_t json_len, bool include_time_offset, uint32_t time_offset_bits,
+                                bool include_brightness_cap, uint8_t brightness_cap, bool include_palette_override,
+                                uint8_t palette_override, bool include_color_correction, uint32_t color_correction,
+                                bool include_color_temperature, uint32_t color_temperature)
+{
+    if (json_len < 3) {
+        return false;
+    }
+
+    json[0] = '{';
+    json[1] = '\0';
+    size_t used = 1;
+    bool first = true;
+    char field[48];
+
+    if (include_time_offset) {
+        int len = snprintf(field, sizeof(field), "\"0:U32\":%" PRIu32, time_offset_bits);
+        if (len <= 0 || len >= static_cast<int>(sizeof(field)) || !append_json_field(json, json_len, used, first, field)) {
+            return false;
+        }
+    }
+    if (include_brightness_cap) {
+        int len = snprintf(field, sizeof(field), "\"1:U8\":%u", brightness_cap);
+        if (len <= 0 || len >= static_cast<int>(sizeof(field)) || !append_json_field(json, json_len, used, first, field)) {
+            return false;
+        }
+    }
+    if (include_palette_override) {
+        int len = snprintf(field, sizeof(field), "\"2:U8\":%u", palette_override);
+        if (len <= 0 || len >= static_cast<int>(sizeof(field)) || !append_json_field(json, json_len, used, first, field)) {
+            return false;
+        }
+    }
+    if (include_color_correction) {
+        int len = snprintf(field, sizeof(field), "\"3:U32\":%" PRIu32, color_correction);
+        if (len <= 0 || len >= static_cast<int>(sizeof(field)) || !append_json_field(json, json_len, used, first, field)) {
+            return false;
+        }
+    }
+    if (include_color_temperature) {
+        int len = snprintf(field, sizeof(field), "\"4:U32\":%" PRIu32, color_temperature);
+        if (len <= 0 || len >= static_cast<int>(sizeof(field)) || !append_json_field(json, json_len, used, first, field)) {
+            return false;
+        }
+    }
+
+    if (first || used + 2 > json_len) {
+        return false;
+    }
+    json[used++] = '}';
+    json[used] = '\0';
+    return true;
 }
 
 int set_scene_handler(int argc, char **argv)
@@ -419,6 +524,167 @@ int scheduled_scene_group_handler(int argc, char **argv)
                        json);
 }
 
+// lo-set-calibration <node-id> <endpoint-id> <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]
+// Unicast per-node field tuning (DATA, not firmware): synchronized timing offset
+// (signed ms), master-brightness ceiling (0..255), palette override (255 = use
+// the effect default), and optional LED color correction / temperature
+// (RRGGBB hex). Use "-" for any field you want the node to keep unchanged.
+// Persisted on the node; survives a power-cycle. This is how a hole/zone is
+// aligned after install with no reflash.
+int set_calibration_handler(int argc, char **argv)
+{
+    argc--;
+    argv++;
+
+    if (argc < 5 || argc > 7) {
+        ESP_LOGE(TAG, "usage: lo-set-calibration <node-id> <endpoint-id> <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]");
+        ESP_LOGE(TAG, "  use '-' to keep the node's current value; palette-override 255 = use the effect default");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint64_t destination = 0;
+    uint16_t endpoint = 0;
+    bool include_time_offset = false;
+    uint32_t time_offset_bits = 0;
+    bool include_brightness_cap = false;
+    uint8_t brightness_cap = 0;
+    bool include_palette_override = false;
+    uint8_t palette_override = 0;
+    bool include_color_correction = false;
+    uint32_t color_correction = 0;
+    bool include_color_temperature = false;
+    uint32_t color_temperature = 0;
+
+    if (!parse_u64(argv[0], destination) || !parse_u16(argv[1], endpoint)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!arg_is_keep(argv[2])) {
+        if (!parse_i32_bits(argv[2], time_offset_bits)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        include_time_offset = true;
+    }
+    if (!arg_is_keep(argv[3])) {
+        if (!parse_u8(argv[3], brightness_cap)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        include_brightness_cap = true;
+    }
+    if (!arg_is_keep(argv[4])) {
+        if (!parse_u8(argv[4], palette_override)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        include_palette_override = true;
+    }
+    if (argc >= 6 && !arg_is_keep(argv[5])) {
+        if (!parse_rgb_packed(argv[5], color_correction)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        include_color_correction = true;
+    }
+    if (argc >= 7 && !arg_is_keep(argv[6])) {
+        if (!parse_rgb_packed(argv[6], color_temperature)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        include_color_temperature = true;
+    }
+
+    if (!include_time_offset && !include_brightness_cap && !include_palette_override && !include_color_correction &&
+        !include_color_temperature) {
+        ESP_LOGE(TAG, "lo-set-calibration: nothing to change; pass at least one value instead of '-'");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char json[160];
+    if (!build_set_calibration_json(json, sizeof(json), include_time_offset, time_offset_bits, include_brightness_cap,
+                                    brightness_cap, include_palette_override, palette_override,
+                                    include_color_correction, color_correction, include_color_temperature,
+                                    color_temperature)) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    return send_invoke(destination, endpoint, led_orchestra::matter::command::kSetCalibration, json);
+}
+
+// lo-set-calibration-group <group-id> <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]
+// Groupcast the same calibration to every enrolled node. Useful for a uniform
+// zone brightness/palette; per-hole timing offsets are normally set unicast. Use
+// "-" for any field you want recipients to keep unchanged.
+int set_calibration_group_handler(int argc, char **argv)
+{
+    argc--;
+    argv++;
+
+    if (argc < 4 || argc > 6) {
+        ESP_LOGE(TAG, "usage: lo-set-calibration-group <group-id> <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint16_t group_id = 0;
+    bool include_time_offset = false;
+    uint32_t time_offset_bits = 0;
+    bool include_brightness_cap = false;
+    uint8_t brightness_cap = 0;
+    bool include_palette_override = false;
+    uint8_t palette_override = 0;
+    bool include_color_correction = false;
+    uint32_t color_correction = 0;
+    bool include_color_temperature = false;
+    uint32_t color_temperature = 0;
+
+    if (!parse_u16(argv[0], group_id)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!arg_is_keep(argv[1])) {
+        if (!parse_i32_bits(argv[1], time_offset_bits)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        include_time_offset = true;
+    }
+    if (!arg_is_keep(argv[2])) {
+        if (!parse_u8(argv[2], brightness_cap)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        include_brightness_cap = true;
+    }
+    if (!arg_is_keep(argv[3])) {
+        if (!parse_u8(argv[3], palette_override)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        include_palette_override = true;
+    }
+    if (argc >= 5 && !arg_is_keep(argv[4])) {
+        if (!parse_rgb_packed(argv[4], color_correction)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        include_color_correction = true;
+    }
+    if (argc >= 6 && !arg_is_keep(argv[5])) {
+        if (!parse_rgb_packed(argv[5], color_temperature)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        include_color_temperature = true;
+    }
+
+    if (!include_time_offset && !include_brightness_cap && !include_palette_override && !include_color_correction &&
+        !include_color_temperature) {
+        ESP_LOGE(TAG, "lo-set-calibration-group: nothing to change; pass at least one value instead of '-'");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char json[160];
+    if (!build_set_calibration_json(json, sizeof(json), include_time_offset, time_offset_bits, include_brightness_cap,
+                                    brightness_cap, include_palette_override, palette_override,
+                                    include_color_correction, color_correction, include_color_temperature,
+                                    color_temperature)) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    uint64_t destination = chip::NodeIdFromGroupId(group_id);
+    return send_invoke(destination, led_orchestra::matter::kEndpointIdHint,
+                       led_orchestra::matter::command::kSetCalibration, json);
+}
+
 // lo-read-config <node-id> <endpoint-id>
 // Read all LED Orchestra cluster attributes from a single LED node in one
 // ReadRequest and print them. Useful for verifying durable config (segment
@@ -441,10 +707,10 @@ int read_config_handler(int argc, char **argv)
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Batch all 7 LED Orchestra cluster attributes into a single ReadRequest
+    // Batch all 10 LED Orchestra cluster attributes into a single ReadRequest
     // so only one CASE session is established. Results arrive asynchronously
     // and are printed by the framework (chip[TOO] tag).
-    constexpr size_t kNumAttrs = 7;
+    constexpr size_t kNumAttrs = 10;
     using chip::Platform::ScopedMemoryBufferWithSize;
     ScopedMemoryBufferWithSize<uint16_t> endpoints;
     ScopedMemoryBufferWithSize<uint32_t> clusters;
@@ -466,6 +732,9 @@ int read_config_handler(int argc, char **argv)
     attrs[4] = led_orchestra::matter::attribute::kLedGpio;
     attrs[5] = led_orchestra::matter::attribute::kFirmwareVersion;
     attrs[6] = led_orchestra::matter::attribute::kLastSequence;
+    attrs[7] = led_orchestra::matter::attribute::kCalibBrightnessCap;
+    attrs[8] = led_orchestra::matter::attribute::kCalibPaletteOverride;
+    attrs[9] = led_orchestra::matter::attribute::kCalibTimeOffsetMs;
 
     ESP_LOGI(TAG, "reading LED Orchestra cluster 0x%" PRIX32 " on node 0x%" PRIX64 " endpoint %u (%zu attrs)",
              led_orchestra::matter::kClusterId, node_id, endpoint, kNumAttrs);
@@ -496,6 +765,8 @@ int show_group_help_handler(int, char **)
     printf("    lo-set-scene-group 0x%04X <effect> <rrggbb> <speed> <brightness>\n", g);
     printf("    lo-sync-clock-group 0x%04X\n", g);
     printf("    lo-scheduled-scene-group 0x%04X <delay-ms> <effect> <rrggbb> <speed> <brightness>\n", g);
+    printf("    lo-set-calibration-group 0x%04X <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]\n",
+           g);
     printf("\n");
     printf("  See docs/console.md or matter-prototype/s3-h2-hub-validation/lo-provision-group-member\n");
     printf("  for exact KeySetWrite, GroupKeyMap, AddGroup, and least-privilege ACL commands.\n");
@@ -531,6 +802,14 @@ esp_err_t led_orchestra_console_register_commands()
     };
     ESP_RETURN_ON_ERROR(esp_console_cmd_register(&sync_clock), TAG, "failed to register lo-sync-clock");
 
+    const esp_console_cmd_t set_calibration = {
+        .command = "lo-set-calibration",
+        .help = "Send LED Orchestra SetCalibration (unicast): <node> <endpoint> <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]",
+        .hint = nullptr,
+        .func = &set_calibration_handler,
+    };
+    ESP_RETURN_ON_ERROR(esp_console_cmd_register(&set_calibration), TAG, "failed to register lo-set-calibration");
+
     const esp_console_cmd_t add_group = {
         .command = "lo-add-group",
         .help = "Enroll a node endpoint into a group (Groups AddGroup): <node> <endpoint> [group-id] [group-name]",
@@ -563,6 +842,15 @@ esp_err_t led_orchestra_console_register_commands()
     };
     ESP_RETURN_ON_ERROR(esp_console_cmd_register(&scheduled_scene_group), TAG,
                         "failed to register lo-scheduled-scene-group");
+
+    const esp_console_cmd_t set_calibration_group = {
+        .command = "lo-set-calibration-group",
+        .help = "Groupcast SetCalibration: <group-id> <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]",
+        .hint = nullptr,
+        .func = &set_calibration_group_handler,
+    };
+    ESP_RETURN_ON_ERROR(esp_console_cmd_register(&set_calibration_group), TAG,
+                        "failed to register lo-set-calibration-group");
 
     const esp_console_cmd_t show_group_help = {
         .command = "lo-show-group-help",

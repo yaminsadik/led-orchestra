@@ -148,6 +148,22 @@ esp-matter/IDF bump erodes. Not worth it to save ~$1–2/node. **Rejected.**
 nodes as N8. Land the 8 MB partition layout (§5) before the bench scale gate so
 soak/OTA testing happens on the shipping flash geometry.
 
+## 9. Mixed-Fleet Note (N4 + N8 together)
+
+If a partially-built installation ends up using a mix of **4 MB** and **8 MB**
+LED-node boards:
+
+- Keep using the **8 MB build** on N8 nodes.
+- Keep a separate **4 MB compatibility build** for N4 nodes.
+- A 4 MB image can boot on an 8 MB board, but doing so throws away the extra
+  flash and leaves the node stuck with the near-full 4 MB OTA slots.
+- Therefore, if both hardware classes remain in the fleet and LED-node code
+  changes, expect to produce **two LED-node firmware artifacts per release**:
+  N4 and N8.
+
+This does **not** change the recommendation above: the fleet should still move
+toward N8 wherever practical.
+
 ---
 *Sources: Adafruit ESP32-C6-WROOM-1-N4/N8 listings; DigiKey 17728866. On-hardware
 measurements captured 2026-06-15 from the connected N8 unit.*

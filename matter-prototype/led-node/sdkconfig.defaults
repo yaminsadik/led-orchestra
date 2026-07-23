@@ -1,8 +1,8 @@
 # ESP32-C6 Matter-over-Thread LED node prototype target.
 CONFIG_IDF_TARGET="esp32c6"
 # Deployment standard is ESP32-C6-WROOM-1-N8 (8 MB) — see
-# docs/led-node-flash-sizing-decision.md. For 4 MB (N4) units, set _4MB here and
-# point CONFIG_PARTITION_TABLE_CUSTOM_FILENAME back at partitions.csv.
+# docs/led-node-flash-sizing-decision.md. For 4 MB (N4) units, layer
+# sdkconfig.4mb.defaults in a separate build dir.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_LIBSODIUM_USE_MBEDTLS_SHA=y
 CONFIG_MBEDTLS_HKDF_C=y

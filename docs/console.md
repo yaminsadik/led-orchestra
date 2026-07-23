@@ -81,13 +81,23 @@ all-nodes group is `0x0001`. Effect ids: `0` off, `1` solid, `2` rainbow,
 strip; scrolls with `speed`, ignores RGB), `4` aurora breathe (soft overlapping
 palette waves with a breathing intensity curve; scrolls with `speed`, ignores
 RGB), `5` comet (RGB comet tail), `6` theater chase (RGB chase), `7` palette
-cycle (aurora gradient; ignores RGB), and `8` twinkle (deterministic RGB
-twinkles).
+cycle (aurora gradient; ignores RGB), `8` twinkle (deterministic RGB twinkles),
+and the mini-golf installation effects `9` ocean drift (ambient underwater,
+default `ocean` palette), `10` color wave (luminous palette crest that travels
+the whole strip — tune hole-to-hole with the calibration time offset), `11` pulse
+reveal (attraction sweep, default `coral`), `12` celebration (gold sparkle for a
+scoring moment), and `13` identify (install mapping — segment in a per-node-id
+color with white-tipped ends), `14` tidal surge (whitecap surf, default
+`seafoam-surf`), `15` party confetti (neon party bursts, default `neon-party`),
+and `16` champagne toast (soft anniversary shimmer, default `champagne-rose`).
+Palette-driven effects (`4`, `7`, `9`-`12`, `14`-`16`) honor the per-node
+`lo-set-calibration` palette override.
 
 ```text
 lo-set-scene <node-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]
 lo-set-node-config <node-id> <endpoint-id> <orchestra-node-id> <segment-start> <segment-len> <total-leds> <led-gpio>
 lo-sync-clock <node-id> <endpoint-id> [controller-time-ms]
+lo-set-calibration <node-id> <endpoint-id> <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]
 lo-read-config <node-id> <endpoint-id>
 ```
 
@@ -106,11 +116,37 @@ lo-read-config <node-id> <endpoint-id>
   boot.
 - `lo-sync-clock` — push the controller clock; defaults to the controller's
   current uptime in ms if `controller-time-ms` is omitted.
+- `lo-set-calibration` — **field tuning as data, not firmware.** Per-node
+  runtime knobs an installer adjusts after the strips are mounted, no reflash:
+  - `time-offset-ms` — signed ms added to **this node's render clock** (effect
+    math only; never shifts scheduled-scene activation). This is the hole-to-hole
+    / travel-delay / phase alignment knob: nudge a hole until a synchronized wave
+    or comet looks continuous across the physical gap or bend to the next hole.
+  - `brightness-cap` — master-brightness ceiling `0..255` (`255` = no cap),
+    applied after the per-scene brightness. Use it to dim a hole near seating.
+  - `palette-override` — palette ref that re-skins palette-driven effects;
+    `255` = use the effect's default palette.
+  - `corr-rrggbb` / `temp-rrggbb` — optional LED color correction / white-point
+    (6 hex digits) for matching strip batches/zones.
+  Pass `-` for any field you want to leave unchanged; the console now omits that
+  TLV tag so the node keeps its current value. `255` still means "reset palette
+  override to the effect default", while `FFFFFF` is the identity correction if
+  you want to explicitly set it. Example: `lo-set-calibration 0x1234 1 120 - -`
+  updates only the timing offset; `lo-set-calibration 0x1234 1 - - 9` changes
+  only the palette override to `seafoam-surf`.
+  Unknown palette refs are rejected by the node and are not persisted.
+  The node persists this in NVS and reloads it at boot (`calibration loaded from
+  NVS ...` / `calibration applied ...` in the node log); identity defaults mean an
+  un-calibrated node is unchanged. Example: `lo-set-calibration 0x1234 1 120 200 9`
+  (delay this node 120 ms, cap brightness at 200, force the `seafoam-surf`
+  palette).
 - `lo-read-config` — read all LED Orchestra cluster attributes from a node in a
   single ReadRequest (current effect, segment layout, GPIO, firmware version,
-  last-accepted sequence number). Results arrive asynchronously via `chip[TOO]`
-  log lines. Use after `lo-set-node-config` + power cycle to confirm the
-  persisted config loaded, or after `lo-set-scene` to verify the last sequence.
+  last-accepted sequence number, and the calibration read-back: brightness cap,
+  palette override, and time offset). Results arrive asynchronously via
+  `chip[TOO]` log lines. Use after `lo-set-node-config` + power cycle to confirm
+  the persisted config loaded, after `lo-set-scene` to verify the last sequence,
+  or after `lo-set-calibration` + power cycle to confirm field tuning persisted.
   Example: `lo-read-config 0x1234 1`.
 
 The full field/tag contract lives in
@@ -130,6 +166,7 @@ lo-add-group <node-id> <endpoint-id> [group-id] [group-name]
 lo-set-scene-group <group-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]
 lo-sync-clock-group <group-id> [controller-time-ms]
 lo-scheduled-scene-group <group-id> <delay-ms> <effect-id> <rrggbb> <speed> <brightness> [sequence]
+lo-set-calibration-group <group-id> <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]
 lo-show-group-help
 ```
 
@@ -142,6 +179,10 @@ lo-show-group-help
 - `lo-scheduled-scene-group` — compute `controller_uptime + delay` and groupcast
   a scheduled `SetScene`, so all segments flip together at one synchronized time.
   Pair it with a recent `lo-sync-clock-group` so every node's offset is aligned.
+- `lo-set-calibration-group` — groupcast one calibration to every enrolled node.
+  Useful for a uniform zone brightness or palette; per-hole timing offsets are
+  normally set unicast with `lo-set-calibration` since each hole's offset differs.
+  `-` keeps the current value on every recipient instead of resetting it.
 - `lo-show-group-help` — print the one-time group-enablement sequence below.
 
 ### One-time group key + enrollment setup

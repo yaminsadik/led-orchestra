@@ -18,16 +18,56 @@ idf.py set-target esp32c6
 idf.py build
 ```
 
+For legacy 4 MB (N4) C6 boards, build in a separate directory with the N4
+overlay so the N8 default stays untouched:
+
+```bash
+idf.py -B build-4mb \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.4mb.defaults" \
+  -D SDKCONFIG=build-4mb/sdkconfig set-target esp32c6 build
+```
+
 Flash one physical board at a time while using the default development Matter
 credentials. After commissioning, assign segment metadata from the controller
 with `lo-set-node-config`.
+
+## Mixed 4 MB / 8 MB Fleet
+
+If your LED nodes are a mix of **N4 (4 MB)** and **N8 (8 MB)** C6 boards:
+
+- Build the **default** LED image for **8 MB** nodes.
+- Build the **`sdkconfig.4mb.defaults`** LED image for **4 MB** nodes.
+- A **4 MB LED image can boot on an 8 MB board**, but it wastes the extra flash
+  and keeps the node at the 4 MB app-slot limit. Treat that as a temporary
+  compatibility fallback, not the normal N8 deployment.
+- An **8 MB LED image must not be used on a 4 MB board**.
+
+Operational rule:
+
+- If you change LED-node code and you want both hardware classes to stay on the
+  same feature set, build **two LED-node artifacts** for that release:
+  one N4 image and one N8 image.
+- In practice, treat this as the default release rule: any change that affects
+  LED-node firmware behavior, effects, palettes, rendering, config handling,
+  OTA-visible software, or cluster behavior should produce **both** LED images
+  before the release is considered complete.
+- If a change is controller-only, you do **not** need to rebuild the LED nodes.
+- If a change is LED-node-only, the controller firmware does **not** need to
+  change unless the controller-side protocol/cluster behavior also changed.
+
+Suggested release naming:
+
+- `led-node-n4.bin`
+- `led-node-n8.bin`
 
 ## Current Status
 
 - Builds for `esp32c6`.
 - Runs as a Thread Matter device, not as a Wi-Fi station.
 - Renders `off`, `solid`, `rainbow`, `fibonacci`, `aurora-breathe`, `comet`,
-  `theater-chase`, `palette-cycle`, and `twinkle`.
+  `theater-chase`, `palette-cycle`, `twinkle`, `ocean-drift`, `color-wave`,
+  `pulse-reveal`, `celebration`, `identify`, `tidal-surge`,
+  `party-confetti`, and `champagne-toast`.
 - Persists accepted node config in NVS with magic/version/CRC validation.
 - Supports scheduled `SetScene` promotion using `SyncClock` time offsets.
 - Includes Matter OTA Requestor support and OTA app partitions.
@@ -71,14 +111,16 @@ with `lo-set-node-config`.
   code — new effect behavior ships as compiled firmware via OTA.
 - **Palette registry**: append-only palette refs currently include `0` aurora,
   `1` ember, `2` ocean, `3` coral, `4` jungle, `5` ice, `6` neon-party,
-  `7` gold-score, and `8` maintenance-white-blue. These are data palettes for
-  compiled effects and future declarative bundles; changing effect behavior still
-  ships through OTA.
+  `7` gold-score, `8` maintenance-white-blue, `9` seafoam-surf, and `10`
+  champagne-rose. These are data palettes for compiled effects and future
+  declarative bundles; changing effect behavior still ships through OTA.
 - `SetScene` renders `off`, `solid`, `rainbow`, `fibonacci`, `aurora-breathe`,
-  `comet`, `theater-chase`, `palette-cycle`, and `twinkle`. A scheduled
-  `SetScene` (non-zero start) is staged and promoted at the
-  synchronized start time; the node keeps rendering its active scene until then
-  (keep-last-valid — a scheduled change never blanks a running show).
+  `comet`, `theater-chase`, `palette-cycle`, `twinkle`, `ocean-drift`,
+  `color-wave`, `pulse-reveal`, `celebration`, `identify`, `tidal-surge`,
+  `party-confetti`, and `champagne-toast`. A scheduled `SetScene`
+  (non-zero start) is staged and promoted at the synchronized start time; the
+  node keeps rendering its active scene until then (keep-last-valid — a
+  scheduled change never blanks a running show).
 - **Durable `SetNodeConfig`**: accepted segment config is persisted in NVS
   (magic + version + CRC) and reloaded at boot before the renderer/attributes use
   it ([`main/led_orchestra_config_store.cpp`](main/led_orchestra_config_store.cpp)).
@@ -104,7 +146,12 @@ OTA slots (~39% free)** — comfortable, vs the ~2% free on the retired 4 MB lay
 (see [`../../docs/led-node-flash-sizing-decision.md`](../../docs/led-node-flash-sizing-decision.md)).
 OTA still needs the new image to fit a slot, so record `idf.py size` deltas when
 adding code (notably the real-FastLED engine spike). The 4 MB
-[`partitions.csv`](partitions.csv) remains for any N4 units.
+[`partitions.csv`](partitions.csv) remains for any N4 units and is selected by
+[`sdkconfig.4mb.defaults`](sdkconfig.4mb.defaults).
+
+Current N4 reality: the current 4 MB build still compiles, but it is extremely
+tight (about **1% free** in the OTA slot on the latest verification build). Plan
+for N4 as a constrained compatibility target.
 
 ## Config Targets
 

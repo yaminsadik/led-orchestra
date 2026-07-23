@@ -9,6 +9,8 @@
 #include <nvs_flash.h>
 #include <sdkconfig.h>
 
+#include "led_orchestra_effects.h"
+
 namespace {
 
 static const char *TAG = "lo_cfg_store";
@@ -137,6 +139,71 @@ bool scene_record_is_sane(const SceneRecord &r)
     }
     if (r.crc32 != scene_record_crc(r)) {
         ESP_LOGW(TAG, "stored scene CRC mismatch — ignoring");
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Calibration store — persists the last accepted SetCalibration (per-node field
+// tuning). Shares the "lo_cfg" NVS namespace under its own key.
+// ---------------------------------------------------------------------------
+
+constexpr char kCalibKey[] = "calib";
+
+// 'L''E''D''C' (calibration mnemonic: C = "calibration").
+constexpr uint32_t kCalibMagic = 0x4C454443;
+constexpr uint16_t kCalibVersion = 1;
+
+struct __attribute__((packed)) CalibRecord {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t reserved;
+    int32_t time_offset_ms;
+    uint8_t brightness_cap;
+    uint8_t palette_override;
+    uint8_t pad[2];
+    uint32_t color_correction;
+    uint32_t color_temperature;
+    uint32_t crc32;
+};
+
+static_assert(sizeof(CalibRecord) == 28, "CalibRecord layout changed");
+
+uint32_t calib_record_crc(const CalibRecord &r)
+{
+    return esp_rom_crc32_le(0, reinterpret_cast<const uint8_t *>(&r), offsetof(CalibRecord, crc32));
+}
+
+LedOrchestraCalibration calib_defaults()
+{
+    // Identity: matches g_calibration defaults in led_orchestra_renderer.cpp so a
+    // clean boot and a no-record boot are indistinguishable (no tuning applied).
+    return LedOrchestraCalibration{
+        .time_offset_ms = 0,
+        .brightness_cap = 255,
+        .palette_override = kCalibNoPaletteOverride,
+        .color_correction = 0x00FFFFFF,
+        .color_temperature = 0x00FFFFFF,
+    };
+}
+
+bool calib_record_is_sane(const CalibRecord &r)
+{
+    if (r.magic != kCalibMagic) {
+        ESP_LOGW(TAG, "stored calibration magic mismatch (0x%08" PRIX32 ")", r.magic);
+        return false;
+    }
+    if (r.version != kCalibVersion) {
+        ESP_LOGW(TAG, "stored calibration version %u unsupported (expected %u)", r.version, kCalibVersion);
+        return false;
+    }
+    if (r.crc32 != calib_record_crc(r)) {
+        ESP_LOGW(TAG, "stored calibration CRC mismatch — ignoring");
+        return false;
+    }
+    if (r.palette_override != kCalibNoPaletteOverride && led_orchestra_palette_meta(r.palette_override) == nullptr) {
+        ESP_LOGW(TAG, "stored calibration palette override %u unknown — ignoring", r.palette_override);
         return false;
     }
     return true;
@@ -323,5 +390,91 @@ esp_err_t led_orchestra_scene_save(const LedOrchestraScene &scene)
 
     ESP_LOGI(TAG, "scene persisted: effect=%u rgb=%u,%u,%u speed=%u brightness=%u seq=%" PRIu32,
              scene.effect, scene.red, scene.green, scene.blue, scene.speed, scene.brightness, scene.sequence);
+    return ESP_OK;
+}
+
+esp_err_t led_orchestra_calibration_load(LedOrchestraCalibration &out, bool &from_nvs)
+{
+    out = calib_defaults();
+    from_nvs = false;
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(kNamespace, NVS_READONLY, &handle);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "no persisted calibration namespace yet; using identity defaults");
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_open for calibration failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    CalibRecord record = {};
+    size_t size = sizeof(record);
+    err = nvs_get_blob(handle, kCalibKey, &record, &size);
+    nvs_close(handle);
+
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "no persisted calibration record yet; using identity defaults");
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_get_blob(calib) failed: %s; using identity defaults", esp_err_to_name(err));
+        return ESP_OK;
+    }
+    if (size != sizeof(record) || !calib_record_is_sane(record)) {
+        ESP_LOGW(TAG, "persisted calibration unusable; using identity defaults");
+        return ESP_OK;
+    }
+
+    out = LedOrchestraCalibration{
+        .time_offset_ms = record.time_offset_ms,
+        .brightness_cap = record.brightness_cap,
+        .palette_override = record.palette_override,
+        .color_correction = record.color_correction,
+        .color_temperature = record.color_temperature,
+    };
+    from_nvs = true;
+    return ESP_OK;
+}
+
+esp_err_t led_orchestra_calibration_save(const LedOrchestraCalibration &calibration)
+{
+    CalibRecord record = {};
+    record.magic = kCalibMagic;
+    record.version = kCalibVersion;
+    record.reserved = 0;
+    record.time_offset_ms = calibration.time_offset_ms;
+    record.brightness_cap = calibration.brightness_cap;
+    record.palette_override = calibration.palette_override;
+    record.pad[0] = 0;
+    record.pad[1] = 0;
+    record.color_correction = calibration.color_correction;
+    record.color_temperature = calibration.color_temperature;
+    record.crc32 = calib_record_crc(record);
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(kNamespace, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_open(rw) for calibration failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = nvs_set_blob(handle, kCalibKey, &record, sizeof(record));
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "failed to persist calibration: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG,
+             "calibration persisted: time_offset_ms=%" PRId32 " brightness_cap=%u palette_override=%u "
+             "color_correction=0x%06" PRIX32 " color_temperature=0x%06" PRIX32,
+             calibration.time_offset_ms, calibration.brightness_cap, calibration.palette_override,
+             calibration.color_correction, calibration.color_temperature);
     return ESP_OK;
 }

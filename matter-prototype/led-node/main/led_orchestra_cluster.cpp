@@ -12,6 +12,7 @@
 #include <esp_matter_command.h>
 
 #include "led_orchestra_matter.h"
+#include "led_orchestra_effects.h"
 #include "led_orchestra_renderer.h"
 
 using namespace chip::app;
@@ -210,6 +211,68 @@ esp_err_t handle_sync_clock(const ConcreteCommandPath &path, TLVReader &tlv_data
     return ESP_OK;
 }
 
+esp_err_t handle_set_calibration(const ConcreteCommandPath &path, TLVReader &tlv_data)
+{
+    ESP_RETURN_ON_ERROR(expect_target(path, led_orchestra::matter::command::kSetCalibration), TAG,
+                        "wrong command target");
+
+    // Read-modify-write: start from the current calibration so an omitted tag
+    // keeps its previous value (the controller can tweak one knob in isolation).
+    LedOrchestraCalibration calib = led_orchestra_get_calibration();
+    chip::TLV::TLVType outer;
+    ESP_RETURN_ON_ERROR(enter_struct(tlv_data, outer), TAG, "bad SetCalibration payload");
+
+    CHIP_ERROR err = CHIP_NO_ERROR;
+    while ((err = tlv_data.Next()) == CHIP_NO_ERROR) {
+        chip::TLV::Tag tag = tlv_data.GetTag();
+        if (!chip::TLV::IsContextTag(tag)) {
+            return ESP_FAIL;
+        }
+
+        switch (chip::TLV::TagNumFromTag(tag)) {
+        case led_orchestra::matter::set_calibration_tag::kTimeOffsetMs: {
+            // Carried as U32 two's-complement bits; reinterpret as signed.
+            uint32_t raw = 0;
+            ESP_RETURN_ON_ERROR(decode_value(tlv_data, raw), TAG, "bad time offset");
+            calib.time_offset_ms = static_cast<int32_t>(raw);
+            break;
+        }
+        case led_orchestra::matter::set_calibration_tag::kBrightnessCap:
+            ESP_RETURN_ON_ERROR(decode_value(tlv_data, calib.brightness_cap), TAG, "bad brightness cap");
+            break;
+        case led_orchestra::matter::set_calibration_tag::kPaletteOverride:
+            ESP_RETURN_ON_ERROR(decode_value(tlv_data, calib.palette_override), TAG, "bad palette override");
+            break;
+        case led_orchestra::matter::set_calibration_tag::kColorCorrection:
+            ESP_RETURN_ON_ERROR(decode_value(tlv_data, calib.color_correction), TAG, "bad color correction");
+            break;
+        case led_orchestra::matter::set_calibration_tag::kColorTemperature:
+            ESP_RETURN_ON_ERROR(decode_value(tlv_data, calib.color_temperature), TAG, "bad color temperature");
+            break;
+        default:
+            ESP_LOGW(TAG, "ignoring unknown SetCalibration tag %u",
+                     static_cast<unsigned>(chip::TLV::TagNumFromTag(tag)));
+            break;
+        }
+    }
+
+    if (err != CHIP_END_OF_TLV || tlv_data.ExitContainer(outer) != CHIP_NO_ERROR) {
+        return ESP_FAIL;
+    }
+
+    if (calib.palette_override != kCalibNoPaletteOverride &&
+        led_orchestra_palette_meta(calib.palette_override) == nullptr) {
+        ESP_LOGW(TAG, "rejecting unknown palette override %u", calib.palette_override);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_RETURN_ON_ERROR(led_orchestra_set_calibration(calib), TAG, "failed to apply calibration");
+    update_u8(led_orchestra::matter::attribute::kCalibBrightnessCap, calib.brightness_cap);
+    update_u8(led_orchestra::matter::attribute::kCalibPaletteOverride, calib.palette_override);
+    update_u32(led_orchestra::matter::attribute::kCalibTimeOffsetMs, static_cast<uint32_t>(calib.time_offset_ms));
+    return ESP_OK;
+}
+
 esp_err_t command_callback(const ConcreteCommandPath &path, TLVReader &tlv_data, void *)
 {
     switch (path.mCommandId) {
@@ -219,6 +282,8 @@ esp_err_t command_callback(const ConcreteCommandPath &path, TLVReader &tlv_data,
         return handle_set_node_config(path, tlv_data);
     case led_orchestra::matter::command::kSyncClock:
         return handle_sync_clock(path, tlv_data);
+    case led_orchestra::matter::command::kSetCalibration:
+        return handle_set_calibration(path, tlv_data);
     default:
         return ESP_ERR_NOT_SUPPORTED;
     }
@@ -235,6 +300,7 @@ esp_err_t led_orchestra_cluster_create(esp_matter::endpoint_t *endpoint)
 
     LedOrchestraScene scene = led_orchestra_get_scene();
     LedOrchestraNodeConfig config = led_orchestra_get_node_config();
+    LedOrchestraCalibration calib = led_orchestra_get_calibration();
 
     cluster::global::attribute::create_cluster_revision(custom_cluster, kClusterRevision);
     cluster::global::attribute::create_feature_map(custom_cluster, 0);
@@ -252,6 +318,15 @@ esp_err_t led_orchestra_cluster_create(esp_matter::endpoint_t *endpoint)
                       esp_matter_char_str(kFirmwareVersion, strlen(kFirmwareVersion)), sizeof(kFirmwareVersion));
     attribute::create(custom_cluster, led_orchestra::matter::attribute::kLastSequence, ATTRIBUTE_FLAG_NONE,
                       esp_matter_uint32(scene.sequence));
+    // Field-calibration read-back (kCalibTimeOffsetMs carries the signed int32 as
+    // U32 two's-complement bits). Lets `lo-read-config` confirm per-node tuning
+    // survived a power-cycle without attaching a serial monitor.
+    attribute::create(custom_cluster, led_orchestra::matter::attribute::kCalibBrightnessCap, ATTRIBUTE_FLAG_NONE,
+                      esp_matter_uint8(calib.brightness_cap));
+    attribute::create(custom_cluster, led_orchestra::matter::attribute::kCalibPaletteOverride, ATTRIBUTE_FLAG_NONE,
+                      esp_matter_uint8(calib.palette_override));
+    attribute::create(custom_cluster, led_orchestra::matter::attribute::kCalibTimeOffsetMs, ATTRIBUTE_FLAG_NONE,
+                      esp_matter_uint32(static_cast<uint32_t>(calib.time_offset_ms)));
 
     command::create(custom_cluster, led_orchestra::matter::command::kSetScene, COMMAND_FLAG_ACCEPTED | COMMAND_FLAG_CUSTOM,
                     command_callback);
@@ -259,6 +334,8 @@ esp_err_t led_orchestra_cluster_create(esp_matter::endpoint_t *endpoint)
                     COMMAND_FLAG_ACCEPTED | COMMAND_FLAG_CUSTOM, command_callback);
     command::create(custom_cluster, led_orchestra::matter::command::kSyncClock, COMMAND_FLAG_ACCEPTED | COMMAND_FLAG_CUSTOM,
                     command_callback);
+    command::create(custom_cluster, led_orchestra::matter::command::kSetCalibration,
+                    COMMAND_FLAG_ACCEPTED | COMMAND_FLAG_CUSTOM, command_callback);
 
     ESP_LOGI(TAG, "custom cluster 0x%" PRIX32 " added to endpoint %u", led_orchestra::matter::kClusterId,
              endpoint::get_id(endpoint));

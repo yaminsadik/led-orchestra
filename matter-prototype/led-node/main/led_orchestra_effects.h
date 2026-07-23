@@ -59,5 +59,11 @@ bool led_orchestra_palette(uint8_t palette_ref, lo::CRGBPalette16 &out);
 // Render one pixel for `scene.effect`. Returns the engine color BEFORE the
 // renderer's output policy (color correction / temperature / master brightness)
 // is applied. Per-scene `brightness` IS applied here.
+//
+// `palette_ref` is the palette the renderer resolved for this frame: the
+// per-node calibration palette override when set, otherwise the effect's
+// compiled default palette (LoEffectMeta::palette_ref). Effects that do not use
+// a palette ignore it. Passing the resolved ref in keeps "palettes are data" —
+// the same effect math renders any palette without a recompile.
 lo::CRGB led_orchestra_render_effect(const LedOrchestraScene &scene, const LedOrchestraNodeConfig &node,
-                                     uint16_t global_index, uint64_t time_ms);
+                                     uint16_t global_index, uint64_t time_ms, uint8_t palette_ref);

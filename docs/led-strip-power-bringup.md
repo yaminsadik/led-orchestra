@@ -214,6 +214,34 @@ Flicker improved after adding a common ground. This confirmed that the data line
 needed a shared reference between the ESP32, power supply, and strip. Without
 common ground, even a correct data command can be decoded as random colors.
 
+### Local Node Ground Reference
+
+A later multi-node bench session narrowed the remaining animation flicker down
+further: common ground somewhere in the power system was **not** sufficient by
+itself. The decisive fix was a **direct local ground connection** from each
+ESP32-C6 node to the same LED strip ground used by that node's data input.
+
+Confirmed lesson:
+
+- `GPIO2 -> strip DIN`
+- `C6 GND -> same local strip GND`
+- Keep data and that local ground physically close over the run to the strip
+
+Why this matters:
+
+- Solid colors can look fine even when the local data-reference ground is weak.
+- Animated effects create frequent data transitions and expose ground bounce or
+  poor signal reference much more aggressively.
+- A shared ground only through the PDU, buck path, or another strip can still
+  be electrically "common" while being a poor local reference for the strip
+  input.
+
+Practical bench rule:
+
+- Every node must have its own explicit `C6 GND -> local strip GND` bond.
+- Keep the heavier power/common returns, but do not rely on them as the only
+  strip data reference path.
+
 ## Power Findings
 
 The power adapter currently being tested is 12V, 100W max. That is about:

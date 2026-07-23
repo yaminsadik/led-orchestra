@@ -1,0 +1,15 @@
+# LED-node N4 (4 MB flash) overlay.
+#
+# Layer this OVER sdkconfig.defaults in a separate build dir so the deployment
+# standard N8 config stays unchanged:
+#
+#   idf.py -B build-4mb \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.4mb.defaults" \
+#     -D SDKCONFIG=build-4mb/sdkconfig set-target esp32c6 build
+#
+# This keeps the current LED-node implementation buildable on legacy 4 MB C6
+# boards, but the app-slot headroom is intentionally tight. See
+# docs/led-node-flash-sizing-decision.md before shipping new features on N4.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=n
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

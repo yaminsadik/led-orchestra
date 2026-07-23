@@ -43,3 +43,14 @@ esp_err_t led_orchestra_scene_load(LedOrchestraScene &out, bool &from_nvs);
 // is accepted (scheduled_start_ms == 0) so the node resumes the correct scene
 // after a power cycle without re-provisioning from the controller.
 esp_err_t led_orchestra_scene_save(const LedOrchestraScene &scene);
+
+// Load durable field calibration (SetCalibration) from NVS. Same semantics as
+// the config/scene loaders: on miss or any integrity failure `out` is filled
+// with identity defaults (no time shift, no brightness cap, effect-default
+// palette, identity color correction) and `from_nvs` is set false. The on-flash
+// record is magic/version/CRC wrapped and append-only.
+esp_err_t led_orchestra_calibration_load(LedOrchestraCalibration &out, bool &from_nvs);
+
+// Persist field calibration durably to NVS. Called after a SetCalibration is
+// accepted so per-node timing/brightness/palette tuning survives a reboot.
+esp_err_t led_orchestra_calibration_save(const LedOrchestraCalibration &calibration);

@@ -27,6 +27,33 @@ Matter.
     scrolls with `speed` and ignores the `red`/`green`/`blue` fields.
   - `8`: twinkle — deterministic sparse single-color twinkles keyed by global
     LED index and synchronized time; uses `red`/`green`/`blue`.
+  - `9`: ocean drift — ambient layered underwater drift sampled from a palette
+    (default `ocean`); slow and band-free. Palette-driven; honors the per-node
+    palette override.
+  - `10`: color wave — a luminous palette crest that travels the whole virtual
+    strip (default `aurora`); built to be aligned hole-to-hole with the per-node
+    calibration time offset so it reads as one continuous wave across physical
+    gaps/bends. Palette-driven.
+  - `11`: pulse reveal — a bright palette pulse sweeping over a dim wash (default
+    `coral`); an attraction "look here now" cue. Palette-driven.
+  - `12`: celebration — celebratory gold sparkle + shimmer (default `gold-score`)
+    for a scoring moment. Palette-driven.
+  - `13`: identify — install/diagnostics: render this node's segment in a color
+    keyed to its orchestra node id with white-tipped segment ends, slow blink, so
+    an installer can map which physical strip is which node id. Ignores RGB.
+  - `14`: tidal surge — layered tide motion with bright whitecaps and deep
+    undertow (default `seafoam-surf`) for ocean-theme perimeter runs.
+    Palette-driven.
+  - `15`: party confetti — dense neon confetti bursts over a dim wash (default
+    `neon-party`) for birthday parties and full-venue party scenes.
+    Palette-driven.
+  - `16`: champagne toast — soft champagne shimmer with elegant glints (default
+    `champagne-rose`) for anniversaries and other upscale occasion scenes.
+    Palette-driven.
+
+Palette-driven effects use the effect's default palette unless a per-node palette
+override is set via `SetCalibration` (below). Effect ids and palette refs are an
+append-only namespace — never reorder or reuse.
 
 Use the private development VID/PID during prototypes. Do not allocate final
 cluster ids or certification metadata until the Matter product direction is
@@ -97,6 +124,46 @@ Behavior:
 - Update the node's controller-time offset.
 - Use the offset for synchronized effects and scheduled scenes.
 
+### SetCalibration
+
+Per-node **field tuning delivered as data, not firmware** — the knobs an
+installer adjusts after the strips are on the wall (timing alignment, brightness
+ceiling, palette choice, LED color correction) with no reflash. New effect
+*behavior* still ships only via OTA; this command never carries code.
+
+Fields (all optional — an omitted tag keeps the node's current value, so the
+controller can tweak one knob in isolation):
+
+| Tag | Type | Field |
+| --- | --- | --- |
+| `0` | `U32` | `time_offset_ms` (signed int32 carried as two's-complement bits) |
+| `1` | `U8` | `brightness_cap` (0..255; 255 = no cap) |
+| `2` | `U8` | `palette_override` (palette ref; `255` = use the effect default) |
+| `3` | `U32` | `color_correction` (`0x00RRGGBB`; `0x00FFFFFF` = identity) |
+| `4` | `U32` | `color_temperature` (`0x00RRGGBB`; `0x00FFFFFF` = identity) |
+
+Behavior:
+
+- `time_offset_ms` is added to **this node's render clock** for effect math only,
+  so a synchronized wave/comet can be nudged hole-to-hole to look continuous
+  across physical gaps and bends. It does **not** shift scheduled-scene
+  activation — that always uses the unmodified synchronized clock — so a positive
+  offset re-times the animation without desyncing when scenes flip.
+- `brightness_cap` is the master-brightness ceiling applied after the per-scene
+  `brightness` (the engine output policy's `master_brightness`).
+- `palette_override` replaces the effect's default palette for palette-driven
+  effects; `255` (`0xFF`) means "use the effect default". Non-palette effects
+  ignore it. An unknown palette ref is rejected and not persisted.
+- `color_correction` / `color_temperature` are per-channel LED correction /
+  white-point trim for matching different strip batches or zones.
+- The node **persists** accepted calibration in NVS (magic + version + CRC
+  wrapped, append-only record) and reloads it at boot. Identity defaults
+  (`time_offset_ms=0`, `brightness_cap=255`, `palette_override=255`, corrections
+  `0x00FFFFFF`) mean an un-calibrated node renders exactly as before. A
+  persistence failure does not fail the command (keep-last-valid).
+- Use unicast for per-hole timing offsets; a group command is fine for a uniform
+  zone brightness/palette.
+
 ## Prototype Attributes
 
 | Id | Type | Attribute |
@@ -108,6 +175,13 @@ Behavior:
 | `4` | `U8` | `led_gpio` |
 | `5` | `STR` | `firmware_version` |
 | `6` | `U32` | `last_sequence` |
+| `7` | `U8` | `calib_brightness_cap` |
+| `8` | `U8` | `calib_palette_override` |
+| `9` | `U32` | `calib_time_offset_ms` (signed int32 as two's-complement bits) |
+
+The `calib_*` attributes mirror the last accepted `SetCalibration` so
+`lo-read-config` can confirm per-node tuning survived a power-cycle without a
+serial monitor.
 
 ## Controller Console Helpers
 
@@ -117,6 +191,7 @@ The controller-node registers these USB shell commands (unicast):
 lo-set-scene <node-id> <endpoint-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]
 lo-set-node-config <node-id> <endpoint-id> <orchestra-node-id> <segment-start> <segment-len> <total-leds> <led-gpio>
 lo-sync-clock <node-id> <endpoint-id> [controller-time-ms]
+lo-set-calibration <node-id> <endpoint-id> <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]
 ```
 
 and these group commands (see the [Group Commands](#group-commands) contract):
@@ -126,6 +201,7 @@ lo-add-group <node-id> <endpoint-id> [group-id] [group-name]
 lo-set-scene-group <group-id> <effect-id> <rrggbb> <speed> <brightness> [sequence] [scheduled-start-ms]
 lo-sync-clock-group <group-id> [controller-time-ms]
 lo-scheduled-scene-group <group-id> <delay-ms> <effect-id> <rrggbb> <speed> <brightness> [sequence]
+lo-set-calibration-group <group-id> <time-offset-ms|-> <brightness-cap|-> <palette-override|-> [corr-rrggbb|-] [temp-rrggbb|-]
 lo-show-group-help
 ```
 

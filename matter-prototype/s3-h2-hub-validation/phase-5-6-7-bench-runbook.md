@@ -137,6 +137,12 @@ scale/soak.
 `brightness=60` (~24% of full scale) is the proven bench power workaround. This is
 a bench power concern, not a code limit — ramp up only after strips are stable.
 
+Bench lesson from 2026-07-02: if solid scenes are reliable but animated effects
+flicker, check the **local node-to-strip ground reference** before blaming
+Matter or effect code. Each ESP32-C6 node needs a direct `GND -> local strip
+GND` connection at the strip input; shared/common grounding only through the
+PDU or power-distribution path was not enough on the bench.
+
 ## 10. Record heap before/after
 
 The hub and nodes log heap every 10 s (`lo_heap: free=.. min_free=.. largest=..`).

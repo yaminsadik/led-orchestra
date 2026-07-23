@@ -141,6 +141,21 @@ transport remain open by design (see the effect-management decision below and
 `architecture.md`); the code boundaries (commands append-only, bundles-are-data,
 distribute-then-activate) are in place.
 
+Runtime config/calibration (field tuning is data, not firmware): `SetCalibration`
+(custom-cluster command `0x03`, append-only) delivers per-node field tuning as
+data — a signed synchronized-timing offset (the hole-to-hole / travel-delay
+alignment knob, applied to effect math only, never to scheduled-scene
+activation), a master-brightness cap, a palette override for palette-driven
+effects, and LED color correction / white-point. It is persisted in NVS
+(magic/version/CRC, identity defaults) and read back via three `calib_*`
+attributes through `lo-read-config`. Delivered with `lo-set-calibration`
+(unicast, per-hole) and `lo-set-calibration-group`. This makes the mini-golf
+install tunable after mounting with no reflash; only new effect *algorithms* ship
+through OTA. The built-in effect set was extended (append-only) with
+installation-oriented effects `9`-`13`: ocean drift, color wave (the
+calibration-tunable synchronized wave), pulse reveal, celebration, and identify
+(install mapping).
+
 Goal: make the hub the source of truth for node config, effect timing, and the
 distribution of declarative program bundles.
 

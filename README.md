@@ -39,6 +39,9 @@ What works today:
 - The controller boots with USB shell and private operator AP ingress.
 - Matter commissioning, Thread bring-up, group commands, durable node config,
   scheduled scene support, and OTA requestor/provider scaffolding are present.
+- The LED-node scene library now covers ambient ocean looks plus party and
+  occasion scenes for venue use, including wave/surf, reveal, celebration, and
+  upscale shimmer cues.
 - Multi-node synchronized scene and offline OTA still need the remaining
   hardware gates before they are field-ready.
 
@@ -89,6 +92,24 @@ idf.py set-target esp32c6
 idf.py build
 ```
 
+If your LED-node fleet mixes **4 MB** and **8 MB** ESP32-C6 boards, also build a
+second LED image for the N4 units:
+
+```bash
+cd matter-prototype/led-node
+idf.py -B build-4mb \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.4mb.defaults" \
+  -D SDKCONFIG=build-4mb/sdkconfig set-target esp32c6 build
+```
+
+Release rule for mixed LED fleets:
+
+- Any change that alters the **LED-node firmware** means shipping **two**
+  LED-node images for that release: one **N8** image and one **N4** image.
+- Do not treat one image as the long-term universal image for both hardware
+  classes. A 4 MB image may boot on an 8 MB node, but it keeps the node at the
+  tighter 4 MB limit.
+
 Build the controller node:
 
 ```bash
@@ -96,6 +117,13 @@ cd ../controller-node
 idf.py set-target esp32c6
 idf.py build
 ```
+
+Controller flash-size rule:
+
+- The default commissioner build fits the proven **4 MB** layout and can also be
+  flashed to an **8 MB** controller board.
+- If you want the controller to host the offline OTA Provider build, use an
+  **8 MB controller board** and the `sdkconfig.ota-provider.defaults` overlay.
 
 Before flashing the controller AP image, create local AP credentials from the
 committed template:
@@ -112,7 +140,8 @@ Then edit `sdkconfig.defaults.local`. Do not commit real SSID/password values.
 - Espressif ESP Thread Border Router / Zigbee Gateway board, used as BR-only:
   ESP32-S3-WROOM-1 host plus ESP32-H2-MINI-1 RCP.
 - One ESP32-C6 dev board for the controller node.
-- One ESP32-C6 dev board per LED node.
+- One ESP32-C6 dev board per LED node. A mixed fleet of **4 MB** and **8 MB**
+  LED-node boards is supported, but it requires separate N4 and N8 LED images.
 - WS2812B / NeoPixel strip per LED node.
 - External 5 V strip power supply. Do not power strips from the ESP32 board.
 - Shared ground between ESP32 and LED power supply.
